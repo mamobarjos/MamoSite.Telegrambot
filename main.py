@@ -1,7 +1,11 @@
 import logging
+import os
+import threading
+from flask import Flask
 from telegram import Update
 from telegram.ext import (
     Application,
+    ApplicationBuilder,
     ConversationHandler,
     CommandHandler,
     MessageHandler,
@@ -45,13 +49,36 @@ from handlers import (
 from config import TOKEN
 
 # إعداد التسجيل
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
+
+# --- إضافة خادم وهمي لـ Render لضمان بقاء البوت حياً ---
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "Bot is running!", 200
+
+def run_flask():
+    # Render يمرر لنا رقم المنفذ (Port) عبر متغير بيئة
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def main() -> None:
     """تشغيل البوت"""
+    if not TOKEN:
+        logger.error("لم يتم العثور على TOKEN في متغيرات البيئة!")
+        return
+
+    # تشغيل الخادم الوهمي في خيط (Thread) منفصل
+    threading.Thread(target=run_flask, daemon=True).start()
+    logger.info("بدء تشغيل الخادم الصغير لـ Render...")
+
     # إنشاء التطبيق
-    application = Application.builder().token(TOKEN).build()
+    application = ApplicationBuilder().token(TOKEN).build()
 
     # إعداد المحادثة
     conv_handler = ConversationHandler(
