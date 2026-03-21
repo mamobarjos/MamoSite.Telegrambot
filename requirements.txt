@@ -1,0 +1,9 @@
+python-telegram-bot
+fuzzywuzzy
+python-Levenshtein
+arabic-reshaper
+python-bidi
+pandas
+openpyxl
+supabase
+python-dotenv
