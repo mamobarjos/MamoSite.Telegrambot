@@ -293,7 +293,6 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     elif query.data.startswith("app_"):
         from db import fetch_pending_suggestions, update_suggestion_status, add_site
-        from data import CATEGORY_TRANSLATION, SUB_CATEGORY_TRANSLATION
         
         sug_id = query.data.split("_")[1]
         suggestions = context.user_data.get('suggestions_list', [])
