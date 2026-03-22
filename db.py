@@ -208,7 +208,7 @@ def is_admin(user_id: int) -> bool:
         return True
     try:
         client = get_client()
-        result = client.table("admins").select("user_id").eq("user_id", user_id).execute()
+        result = client.table("admins").select("telegram_id").eq("telegram_id", user_id).execute()
         return len(result.data) > 0
     except Exception as e:
         logger.error(f"خطأ في التحقق من المدير: {e}")
@@ -218,7 +218,7 @@ def add_admin(user_id: int, name: str) -> bool:
     """إضافة مدير جديد"""
     try:
         client = get_client()
-        data = {"user_id": user_id, "name": name}
+        data = {"telegram_id": user_id, "name": name}
         client.table("admins").insert(data).execute()
         return True
     except Exception as e:
