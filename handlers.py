@@ -23,7 +23,7 @@ from data import (
     index_data,
 )
 from db import check_duplicate, is_admin, add_admin, fetch_all_admins
-from config import ADMIN_PASSWORD
+from config import SUPABASE_URL, ADMIN_PASSWORD
 from telegram.ext import ApplicationHandlerStop
 
 # إعداد التسجيل

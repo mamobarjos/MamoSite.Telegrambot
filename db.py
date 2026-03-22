@@ -202,6 +202,30 @@ def check_duplicate(website: str) -> list:
         return []
 
 
+def is_admin(user_id: int) -> bool:
+    """التحقق مما إذا كان المستخدم مديراً"""
+    if user_id == 257741366: # Owner Fallback
+        return True
+    try:
+        client = get_client()
+        result = client.table("admins").select("user_id").eq("user_id", user_id).execute()
+        return len(result.data) > 0
+    except Exception as e:
+        logger.error(f"خطأ في التحقق من المدير: {e}")
+        return False
+
+def add_admin(user_id: int, name: str) -> bool:
+    """إضافة مدير جديد"""
+    try:
+        client = get_client()
+        data = {"user_id": user_id, "name": name}
+        client.table("admins").insert(data).execute()
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في إضافة مدير: {e}")
+        return False
+
+
 def fetch_all_admins() -> list:
     """جلب قائمة بجميع المسؤولين"""
     try:
