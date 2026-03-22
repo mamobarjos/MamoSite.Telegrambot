@@ -178,10 +178,6 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     query = update.callback_query
     logger.info(f"استقبال callback_query: {query.data} من المستخدم {update.effective_user.id}")
     await query.answer()
-    logger.info(f"تم النقر على الزر: {query.data} بواسطة المستخدم {update.effective_user.id}")
-
-    # إضافة تأخير بسيط لتجنب حدود Telegram API
-    await asyncio.sleep(0.5)
 
     if query.data == 'start_add':
         context.user_data.clear()
@@ -196,7 +192,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         from db import fetch_pending_suggestions, update_suggestion_status
         suggestions = fetch_pending_suggestions()
         if not suggestions:
-            await query.answer("لا يوجد اقتراحات حالياً", show_alert=True)
+            await query.edit_message_text("📭 لا يوجد اقتراحات معلقة حالياً.")
+            await asyncio.sleep(1)
             return await start(update, context)
             
         sug = suggestions[0]
@@ -238,15 +235,33 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         
         if main_en and sub_en:
             add_site(
-                main_category_en=main_en,
-                sub_category_en=sub_en,
+                main_category=main_en,
+                sub_category=sub_en,
                 website=sug.get('website', ''),
                 description=sug.get('description', ''),
                 benefit=sug.get('benefit', '')
             )
-            await query.answer("✅ تم قبول وإضافة الموقع مباشرة للفرع المحدد!", show_alert=True)
-            query.data = 'review_suggestions'
-            return await handle_button(update, context)
+            # عرض الاقتراح التالي مباشرة بدون استدعاء تكراري
+            next_suggestions = fetch_pending_suggestions()
+            if next_suggestions:
+                next_sug = next_suggestions[0]
+                text = (f"✅ تم قبول وإضافة الموقع!\n\n📩 اقتراح التالي:\n\n"
+                        f"🌐 الموقع: {next_sug.get('website', '')}\n"
+                        f"📂 التصنيفات: {next_sug.get('main_category', '')} > {next_sug.get('sub_category', 'غير محدد')}\n"
+                        f"📝 الوصف: {next_sug.get('description', '')}\n"
+                        f"💡 الفائدة: {next_sug.get('benefit', 'لا يوجد')}")
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ موافقة وتسكين", callback_data=f"app_{next_sug['id']}"),
+                     InlineKeyboardButton("❌ تعليق/رفض", callback_data=f"rej_{next_sug['id']}")],
+                    [InlineKeyboardButton("تخطي ➡️", callback_data="skip_sug"),
+                     InlineKeyboardButton("رجوع ⬅️", callback_data='main_menu')]
+                ])
+                await query.edit_message_text(text, reply_markup=keyboard)
+            else:
+                await query.edit_message_text("✅ تم قبول وإضافة الموقع!\n\n📭 لا يوجد اقتراحات أخرى معلقة.")
+                await asyncio.sleep(1)
+                return await start(update, context)
+            return NAME
         else:
             context.user_data['name'] = sug.get('website', '')
             context.user_data['description'] = sug.get('description', '')
@@ -290,8 +305,9 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     # --- قسم إدارة المسؤولين ---
     elif query.data == 'manage_admins':
         if update.effective_user.id != 1156962576:
-            await query.answer("⛔ فقط المالك يمكنه إدارة المسؤولين", show_alert=True)
-            return NAME
+            await query.edit_message_text("⛔ فقط المالك يمكنه إدارة المسؤولين")
+            await asyncio.sleep(1)
+            return await start(update, context)
         
         admins = fetch_all_admins()
         text = "👥 **إدارة المسؤولين**\n\n"
@@ -330,7 +346,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         admins = fetch_all_admins()
         admins = [a for a in admins if a.get('telegram_id') != 1156962576]  # لا تسمح بحذف المالك
         if not admins:
-            await query.answer("لا يوجد مسؤولون يمكن حذفهم", show_alert=True)
+            await query.edit_message_text("✅ لا يوجد مسؤولون يمكن حذفهم.")
+            await asyncio.sleep(1)
             return await start(update, context)
         
         keyboard = []
@@ -944,29 +961,4 @@ async def generate_and_send_excel(message, flat_data, filename, success_text):
                     os.remove(temp_file)
                 except Exception as e:
                     logger.error(f"فشل في مسح الملف المؤقت {temp_file}: {e}")
-
-# --- معالج المحادثة ---
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler('start', start)],
-    states={
-        NAME: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, get_name),
-            CallbackQueryHandler(handle_button)
-        ],
-        DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_description)],
-        BENEFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_benefit)],
-        MAIN_CATEGORY: [CallbackQueryHandler(get_main_category)],
-        SUB_CATEGORY: [CallbackQueryHandler(get_sub_category)],
-        CONFIRM: [CallbackQueryHandler(confirm_data)],
-        SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, perform_search)],
-        VIEW_RESULT: [CallbackQueryHandler(handle_button)],
-        EDIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_name)],
-        EDIT_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_description)],
-        EDIT_BENEFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_benefit)],
-        EXPORT_MENU: [CallbackQueryHandler(handle_button)],
-        EXPORT_SMART_SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_export_smart_search)],
-        EXPORT_MAIN_CAT_SELECT: [CallbackQueryHandler(export_get_main_category)],
-        EXPORT_SUB_CAT_SELECT: [CallbackQueryHandler(export_get_sub_category)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel_conversation)]
-)
+
