@@ -204,7 +204,7 @@ def check_duplicate(website: str) -> list:
 
 def is_admin(user_id: int) -> bool:
     """التحقق مما إذا كان المستخدم مديراً"""
-    if user_id == 257741366: # Owner Fallback
+    if user_id == 1156962576: # Owner Fallback
         return True
     try:
         client = get_client()

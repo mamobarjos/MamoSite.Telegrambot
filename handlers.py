@@ -46,7 +46,7 @@ async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # تسجيل الدخول مخصص فقط للمالك
-    if update.effective_user.id != 257741366:
+    if update.effective_user.id != 1156962576:
         await update.message.reply_text("⛔ هذا الأمر مخصص للمالك فقط.\nيرجى التواصل مع المسؤول لإضافتك.")
         return
     
@@ -162,7 +162,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     ])
     
     # Show admin management only for the owner
-    if update.effective_user.id == 257741366:
+    if update.effective_user.id == 1156962576:
         keyboard.append([InlineKeyboardButton("👥 إدارة المسؤولين", callback_data='manage_admins')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -270,7 +270,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     # --- قسم إدارة المسؤولين ---
     elif query.data == 'manage_admins':
-        if update.effective_user.id != 257741366:
+        if update.effective_user.id != 1156962576:
             await query.answer("⛔ فقط المالك يمكنه إدارة المسؤولين", show_alert=True)
             return NAME
         
@@ -278,7 +278,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         text = "👥 **إدارة المسؤولين**\n\n"
         if admins:
             for i, admin in enumerate(admins, 1):
-                owner_badge = " 👑" if admin.get('telegram_id') == 257741366 else ""
+                owner_badge = " 👑" if admin.get('telegram_id') == 1156962576 else ""
                 text += f"{i}. {admin.get('name', 'غير معرف')} (`{admin.get('telegram_id', '?')}`){owner_badge}\n"
         else:
             text += "لا يوجد مسؤولون مسجلون حالياً.\n"
@@ -309,7 +309,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     elif query.data == 'del_admin_list':
         admins = fetch_all_admins()
-        admins = [a for a in admins if a.get('telegram_id') != 257741366]  # لا تسمح بحذف المالك
+        admins = [a for a in admins if a.get('telegram_id') != 1156962576]  # لا تسمح بحذف المالك
         if not admins:
             await query.answer("لا يوجد مسؤولون يمكن حذفهم", show_alert=True)
             return await start(update, context)
