@@ -267,3 +267,18 @@ def update_suggestion_status(suggestion_id: str, new_status: str) -> bool:
     except Exception as e:
         logger.error(f"خطأ في تحديث الاقتراح: {e}")
         return False
+
+def update_suggestion_data(suggestion_id: str, website: str, description: str, benefit: str) -> bool:
+    """تحديث بيانات اقتراح معين (الموقع، الوصف، الفائدة)"""
+    try:
+        client = get_client()
+        client.table("suggestions").update({
+            "website": website,
+            "description": description,
+            "benefit": benefit
+        }).eq("id", suggestion_id).execute()
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في تحديث بيانات الاقتراح: {e}")
+        return False
+

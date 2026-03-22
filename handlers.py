@@ -179,6 +179,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("اختر أحد الخيارات:", reply_markup=reply_markup)
     return NAME
 
+# --- دالة مساعدة لعرض اقتراح ---
+async def show_suggestion(query, context, prefix=""):
+    """عرض اقتراح بالفهرس الحالي مع أزرار التنقل"""
+    suggestions = context.user_data.get('suggestions_list', [])
+    idx = context.user_data.get('sug_index', 0)
+    total = len(suggestions)
+    
+    if not suggestions or idx >= total:
+        await query.edit_message_text("📭 لا يوجد اقتراحات معلقة.")
+        return
+    
+    sug = suggestions[idx]
+    text = (f"{prefix}📩 اقتراح ({idx + 1}/{total}):\n\n"
+            f"🌐 الموقع: {sug.get('website', '')}\n"
+            f"📂 التصنيف: {sug.get('main_category', '')} > {sug.get('sub_category', 'غير محدد')}\n"
+            f"📝 الوصف: {sug.get('description', '')}\n"
+            f"💡 الفائدة: {sug.get('benefit', 'لا يوجد')}")
+    
+    # أزرار الإجراءات
+    row1 = [
+        InlineKeyboardButton("✅ موافقة", callback_data=f"app_{sug['id']}"),
+        InlineKeyboardButton("❌ رفض", callback_data=f"rej_{sug['id']}"),
+        InlineKeyboardButton("✏️ تعديل", callback_data=f"sug_edit_{sug['id']}")
+    ]
+    
+    # أزرار التنقل
+    nav_buttons = []
+    if idx > 0:
+        nav_buttons.append(InlineKeyboardButton("◀️ السابق", callback_data="sug_prev"))
+    if idx < total - 1:
+        nav_buttons.append(InlineKeyboardButton("التالي ▶️", callback_data="sug_next"))
+    
+    row3 = [InlineKeyboardButton("🏠 رجوع للقائمة", callback_data='main_menu')]
+    
+    rows = [row1]
+    if nav_buttons:
+        rows.append(nav_buttons)
+    rows.append(row3)
+    
+    keyboard = InlineKeyboardMarkup(rows)
+    await query.edit_message_text(text, reply_markup=keyboard)
+
 # --- معالجة النقر على الزر ---
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -195,27 +237,31 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         
     # --- قسم الاقتراحات ---
     elif query.data == 'review_suggestions':
-        from db import fetch_pending_suggestions, update_suggestion_status
+        from db import fetch_pending_suggestions
         suggestions = fetch_pending_suggestions()
         if not suggestions:
             await query.edit_message_text("📭 لا يوجد اقتراحات معلقة حالياً.")
             await asyncio.sleep(1)
             return await start(update, context)
-            
-        sug = suggestions[0]
-        text = (f"📩 اقتراح جديد:\n\n"
-                f"🌐 الموقع: {sug.get('website', '')}\n"
-                f"📂 التصنيفات المقترحة: {sug.get('main_category', '')} > {sug.get('sub_category', 'غير محدد')}\n"
-                f"📝 الوصف: {sug.get('description', '')}\n"
-                f"💡 الفائدة: {sug.get('benefit', 'لا يوجد')}")
-                
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ موافقة وتسكين", callback_data=f"app_{sug['id']}"),
-             InlineKeyboardButton("❌ تعليق/رفض", callback_data=f"rej_{sug['id']}")],
-            [InlineKeyboardButton("تخطي ➡️", callback_data=f"skip_sug"),
-             InlineKeyboardButton("رجوع ⬅️", callback_data='main_menu')]
-        ])
-        await query.edit_message_text(text, reply_markup=keyboard)
+        
+        context.user_data['suggestions_list'] = suggestions
+        context.user_data['sug_index'] = 0
+        await show_suggestion(query, context)
+        return NAME
+
+    elif query.data == 'sug_next':
+        suggestions = context.user_data.get('suggestions_list', [])
+        idx = context.user_data.get('sug_index', 0)
+        if idx < len(suggestions) - 1:
+            context.user_data['sug_index'] = idx + 1
+        await show_suggestion(query, context)
+        return NAME
+
+    elif query.data == 'sug_prev':
+        idx = context.user_data.get('sug_index', 0)
+        if idx > 0:
+            context.user_data['sug_index'] = idx - 1
+        await show_suggestion(query, context)
         return NAME
 
     elif query.data.startswith("app_"):
@@ -223,10 +269,11 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         from data import CATEGORY_TRANSLATION, SUB_CATEGORY_TRANSLATION
         
         sug_id = query.data.split("_")[1]
-        suggestions = fetch_pending_suggestions()
+        suggestions = context.user_data.get('suggestions_list', [])
         sug = next((s for s in suggestions if str(s['id']) == sug_id), None)
         if not sug:
-            await query.answer("لم يتم العثور على الاقتراح")
+            await query.edit_message_text("⚠️ لم يتم العثور على الاقتراح.")
+            await asyncio.sleep(1)
             return await start(update, context)
             
         def get_en_key(ar_val, mapping):
@@ -247,22 +294,12 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 description=sug.get('description', ''),
                 benefit=sug.get('benefit', '')
             )
-            # عرض الاقتراح التالي مباشرة بدون استدعاء تكراري
-            next_suggestions = fetch_pending_suggestions()
-            if next_suggestions:
-                next_sug = next_suggestions[0]
-                text = (f"✅ تم قبول وإضافة الموقع!\n\n📩 اقتراح التالي:\n\n"
-                        f"🌐 الموقع: {next_sug.get('website', '')}\n"
-                        f"📂 التصنيفات: {next_sug.get('main_category', '')} > {next_sug.get('sub_category', 'غير محدد')}\n"
-                        f"📝 الوصف: {next_sug.get('description', '')}\n"
-                        f"💡 الفائدة: {next_sug.get('benefit', 'لا يوجد')}")
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✅ موافقة وتسكين", callback_data=f"app_{next_sug['id']}"),
-                     InlineKeyboardButton("❌ تعليق/رفض", callback_data=f"rej_{next_sug['id']}")],
-                    [InlineKeyboardButton("تخطي ➡️", callback_data="skip_sug"),
-                     InlineKeyboardButton("رجوع ⬅️", callback_data='main_menu')]
-                ])
-                await query.edit_message_text(text, reply_markup=keyboard)
+            # تحديث القائمة وعرض التالي
+            updated = fetch_pending_suggestions()
+            context.user_data['suggestions_list'] = updated
+            if updated:
+                context.user_data['sug_index'] = 0
+                await show_suggestion(query, context, prefix="✅ تم قبول وإضافة الموقع!\n\n")
             else:
                 await query.edit_message_text("✅ تم قبول وإضافة الموقع!\n\n📭 لا يوجد اقتراحات أخرى معلقة.")
                 await asyncio.sleep(1)
@@ -283,30 +320,42 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         sug_id = query.data.split("_")[1]
         update_suggestion_status(sug_id, "rejected")
         
-        # تحقق من وجود اقتراحات أخرى
-        remaining = fetch_pending_suggestions()
-        if remaining:
-            sug = remaining[0]
-            text = (f"✅ تم الرفض!\n\n📩 اقتراح التالي:\n\n"
-                    f"🌐 الموقع: {sug.get('website', '')}\n"
-                    f"📂 التصنيفات: {sug.get('main_category', '')} > {sug.get('sub_category', 'غير محدد')}\n"
-                    f"📝 الوصف: {sug.get('description', '')}\n"
-                    f"💡 الفائدة: {sug.get('benefit', 'لا يوجد')}")
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ موافقة وتسكين", callback_data=f"app_{sug['id']}"),
-                 InlineKeyboardButton("❌ تعليق/رفض", callback_data=f"rej_{sug['id']}")],
-                [InlineKeyboardButton("تخطي ➡️", callback_data="skip_sug"),
-                 InlineKeyboardButton("رجوع ⬅️", callback_data='main_menu')]
-            ])
-            await query.edit_message_text(text, reply_markup=keyboard)
+        # تحديث القائمة وعرض التالي
+        updated = fetch_pending_suggestions()
+        context.user_data['suggestions_list'] = updated
+        if updated:
+            context.user_data['sug_index'] = 0
+            await show_suggestion(query, context, prefix="✅ تم الرفض!\n\n")
         else:
             await query.edit_message_text("✅ تم الرفض!\n\n📭 لا يوجد اقتراحات أخرى معلقة.")
             await asyncio.sleep(1)
             return await start(update, context)
         return NAME
 
-    elif query.data == "skip_sug":
-        return await start(update, context)
+    elif query.data.startswith("sug_edit_"):
+        sug_id = query.data.split("sug_edit_")[1]
+        suggestions = context.user_data.get('suggestions_list', [])
+        sug = next((s for s in suggestions if str(s['id']) == sug_id), None)
+        if not sug:
+            await query.edit_message_text("⚠️ لم يتم العثور على الاقتراح.")
+            await asyncio.sleep(1)
+            return await start(update, context)
+        
+        # حفظ بيانات الاقتراح للتعديل
+        context.user_data['editing_suggestion_id'] = sug_id
+        context.user_data['edit_old_name'] = sug.get('website', '')
+        context.user_data['edit_old_description'] = sug.get('description', '')
+        context.user_data['edit_old_benefit'] = sug.get('benefit', '')
+        context.user_data['editing_mode'] = 'suggestion'
+        
+        old_name = sug.get('website', '')
+        await query.edit_message_text(
+            f"✏️ **تعديل بيانات الاقتراح**\n\n"
+            f"📝 **الاسم/الرابط الحالي:**\n`{old_name}`\n\n"
+            f"أدخل الاسم الجديد أو أرسل **-** للإبقاء على الحالي:",
+            parse_mode='Markdown'
+        )
+        return EDIT_NAME
     
     # --- قسم إدارة المسؤولين ---
     elif query.data == 'manage_admins':
@@ -471,7 +520,21 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             await query.answer("⚠️ لا توجد نتائج.", show_alert=True)
             return await start(update, context)
     elif query.data == 'edit_result':
-        await query.edit_message_text("📝 أدخل اسم الموقع الجديد:")
+        search_results = context.user_data.get('search_results', [])
+        index = context.user_data.get('current_result_index', 0)
+        if 0 <= index < len(search_results):
+            result = search_results[index]
+            context.user_data['edit_old_name'] = result.get('website', '')
+            context.user_data['edit_old_description'] = result.get('description', '')
+            context.user_data['edit_old_benefit'] = result.get('benefit', '')
+            context.user_data['editing_mode'] = 'site'
+            old_name = result.get('website', '')
+            await query.edit_message_text(
+                f"✏️ **تعديل الموقع**\n\n"
+                f"📝 **الاسم/الرابط الحالي:**\n`{escape_md(old_name)}`\n\n"
+                f"أدخل الاسم الجديد أو أرسل **-** للإبقاء على الحالي:",
+                parse_mode='Markdown'
+            )
         return EDIT_NAME
     elif query.data == 'delete_result':
         search_results = context.user_data.get('search_results', [])
@@ -686,8 +749,17 @@ async def edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.message or not update.message.text.strip():
         await update.message.reply_text("⚠️ الرجاء إدخال اسم الموقع الجديد:")
         return EDIT_NAME
-    context.user_data['edit_name'] = update.message.text.strip()
-    await update.message.reply_text("✍️ أدخل الوصف الجديد:")
+    
+    user_input = update.message.text.strip()
+    old_name = context.user_data.get('edit_old_name', '')
+    context.user_data['edit_name'] = old_name if user_input == '-' else user_input
+    
+    old_desc = context.user_data.get('edit_old_description', '')
+    await update.message.reply_text(
+        f"✏️ **الوصف الحالي:**\n{escape_md(old_desc)}\n\n"
+        f"أدخل الوصف الجديد أو أرسل **-** للإبقاء على الحالي:",
+        parse_mode='Markdown'
+    )
     return EDIT_DESCRIPTION
 
 # --- معالجة تعديل الوصف ---
@@ -695,8 +767,17 @@ async def edit_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not update.message or not update.message.text.strip():
         await update.message.reply_text("⚠️ الرجاء إدخال الوصف الجديد:")
         return EDIT_DESCRIPTION
-    context.user_data['edit_description'] = update.message.text.strip()
-    await update.message.reply_text("✍️ أدخل الفائدة الجديدة:")
+    
+    user_input = update.message.text.strip()
+    old_desc = context.user_data.get('edit_old_description', '')
+    context.user_data['edit_description'] = old_desc if user_input == '-' else user_input
+    
+    old_benefit = context.user_data.get('edit_old_benefit', '')
+    await update.message.reply_text(
+        f"✏️ **الفائدة الحالية:**\n{escape_md(old_benefit)}\n\n"
+        f"أدخل الفائدة الجديدة أو أرسل **-** للإبقاء على الحالية:",
+        parse_mode='Markdown'
+    )
     return EDIT_BENEFIT
 
 # --- معالجة تعديل الفائدة وتأكيد التعديل ---
@@ -704,8 +785,37 @@ async def edit_benefit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if not update.message or not update.message.text.strip():
         await update.message.reply_text("⚠️ الرجاء إدخال الفائدة الجديدة:")
         return EDIT_BENEFIT
-    context.user_data['edit_benefit'] = update.message.text.strip()
-
+    
+    user_input = update.message.text.strip()
+    old_benefit = context.user_data.get('edit_old_benefit', '')
+    context.user_data['edit_benefit'] = old_benefit if user_input == '-' else user_input
+    
+    editing_mode = context.user_data.get('editing_mode', 'site')
+    
+    if editing_mode == 'suggestion':
+        # تعديل اقتراح
+        from db import update_suggestion_data, fetch_pending_suggestions
+        sug_id = context.user_data.get('editing_suggestion_id', '')
+        success = update_suggestion_data(
+            sug_id,
+            context.user_data['edit_name'],
+            context.user_data['edit_description'],
+            context.user_data['edit_benefit']
+        )
+        if success:
+            await update.message.reply_text("✅ تم تعديل بيانات الاقتراح بنجاح!")
+        else:
+            await update.message.reply_text("⚠️ حدث خطأ أثناء التعديل.")
+        
+        # إعادة تحميل الاقتراحات والعودة
+        updated = fetch_pending_suggestions()
+        context.user_data['suggestions_list'] = updated
+        context.user_data['sug_index'] = 0
+        context.user_data.pop('editing_mode', None)
+        context.user_data.pop('editing_suggestion_id', None)
+        return await start(update, context)
+    
+    # تعديل موقع من نتائج البحث
     search_results = context.user_data.get('search_results', [])
     index = context.user_data.get('current_result_index', 0)
     if 0 <= index < len(search_results):
@@ -713,7 +823,7 @@ async def edit_benefit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         success = edit_site(
             main_category_en=result['main_category_en'],
             sub_category_en=result['sub_category_en'],
-            old_website=result['website'],
+            old_website=context.user_data.get('edit_old_name', result['website']),
             new_website=context.user_data['edit_name'],
             new_description=context.user_data['edit_description'],
             new_benefit=context.user_data['edit_benefit']
@@ -726,6 +836,7 @@ async def edit_benefit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             search_results[index] = result
             context.user_data['search_results'] = search_results
             await update.message.reply_text(
+                f"✅ تم التعديل بنجاح!\n\n"
                 f"📌 النتيجة المعدلة:\n\n"
                 f"الموقع: {result['website']}\n"
                 f"الوصف: {result['description']}\n"
@@ -737,6 +848,7 @@ async def edit_benefit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         else:
             await update.message.reply_text("⚠️ فشل في تعديل الموقع.")
             return await start(update, context)
+    context.user_data.pop('editing_mode', None)
     return VIEW_RESULT
 
 # --- معالجة التصدير الذكي بالبحث ---
