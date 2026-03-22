@@ -22,11 +22,43 @@ from data import (
     smart_search,
     index_data,
 )
-from db import check_duplicate
+from db import check_duplicate, is_admin, add_admin, fetch_all_admins
+from config import ADMIN_PASSWORD
+from telegram.ext import ApplicationHandlerStop
 
 # إعداد التسجيل
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- التحقق الأمني (Middleware) ---
+async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user:
+        return
+    user_id = update.effective_user.id
+    
+    if update.message and update.message.text and update.message.text.startswith('/login'):
+        return
+        
+    if not is_admin(user_id):
+        if update.message:
+            await update.message.reply_text("⛔ عذراً، هذا البوت مخصص للإدارة المركزية فقط.\n\nإذا كنت مسؤولاً، يرجى إرسال أمر الدخول بالشكل التالي:\n`/login PASSWORD`", parse_mode='Markdown')
+        raise ApplicationHandlerStop()
+
+async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args:
+        await update.message.reply_text("⚠️ يرجى إدخال كلمة المرور مع الأمر، مثال:\n`/login 123456`")
+        return
+        
+    if args[0] == ADMIN_PASSWORD:
+        user_id = update.effective_user.id
+        name = update.effective_user.first_name or "Admin"
+        if add_admin(user_id, name):
+            await update.message.reply_text("✅ تم التحقق بنجاح! أنت الآن مدير معتمد.\n\nاضغط /start لفتح لوحة التحكم.")
+        else:
+            await update.message.reply_text("⚠️ حدث خطأ أثناء التسجيل.")
+    else:
+        await update.message.reply_text("❌ كلمة المرور غير صحيحة.")
 
 # تعريف حالات المحادثة
 NAME, DESCRIPTION, BENEFIT, MAIN_CATEGORY, SUB_CATEGORY, CONFIRM, SEARCH, VIEW_RESULT, EDIT_NAME, EDIT_DESCRIPTION, EDIT_BENEFIT, EXPORT_MENU, EXPORT_SMART_SEARCH, EXPORT_MAIN_CAT_SELECT, EXPORT_SUB_CAT_SELECT = range(15)
@@ -83,7 +115,27 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     logger.info(f"بدء المحادثة مع المستخدم {update.effective_user.id}")
-    await update.message.reply_text("اختر أحد الخيارات:", reply_markup=start_keyboard)
+    
+    from db import fetch_pending_suggestions
+    suggestions = fetch_pending_suggestions()
+    count = len(suggestions)
+    
+    keyboard = []
+    if count > 0:
+        keyboard.append([InlineKeyboardButton(f"📩 مراجعة الاقتراحات ({count})", callback_data='review_suggestions')])
+    
+    keyboard.extend([
+        [InlineKeyboardButton("ابدأ إضافة موقع ▶️", callback_data='start_add')],
+        [InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')],
+        [InlineKeyboardButton("البحث 🔍", callback_data='search')]
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text("اختر أحد الخيارات:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("اختر أحد الخيارات:", reply_markup=reply_markup)
     return NAME
 
 # --- معالجة النقر على الزر ---
@@ -96,10 +148,91 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     # إضافة تأخير بسيط لتجنب حدود Telegram API
     await asyncio.sleep(0.5)
 
-    if query.data == 'start':
+    if query.data == 'start_add':
         context.user_data.clear()
         await query.edit_message_text("📝 اسم الموقع أو الرابط:")
         return NAME
+    elif query.data == 'main_menu':
+        context.user_data.clear()
+        return await start(update, context)
+        
+    # --- قسم الاقتراحات ---
+    elif query.data == 'review_suggestions':
+        from db import fetch_pending_suggestions, update_suggestion_status
+        suggestions = fetch_pending_suggestions()
+        if not suggestions:
+            await query.answer("لا يوجد اقتراحات حالياً", show_alert=True)
+            return await start(update, context)
+            
+        sug = suggestions[0]
+        text = (f"📩 اقتراح جديد:\n\n"
+                f"🌐 الموقع: {sug.get('website', '')}\n"
+                f"📂 التصنيفات المقترحة: {sug.get('main_category', '')} > {sug.get('sub_category', 'غير محدد')}\n"
+                f"📝 الوصف: {sug.get('description', '')}\n"
+                f"💡 الفائدة: {sug.get('benefit', 'لا يوجد')}")
+                
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ موافقة وتسكين", callback_data=f"app_{sug['id']}"),
+             InlineKeyboardButton("❌ تعليق/رفض", callback_data=f"rej_{sug['id']}")],
+            [InlineKeyboardButton("تخطي ➡️", callback_data=f"skip_sug"),
+             InlineKeyboardButton("رجوع ⬅️", callback_data='main_menu')]
+        ])
+        await query.edit_message_text(text, reply_markup=keyboard)
+        return NAME
+
+    elif query.data.startswith("app_"):
+        from db import fetch_pending_suggestions, update_suggestion_status, add_site
+        from data import CATEGORY_TRANSLATION, SUB_CATEGORY_TRANSLATION
+        
+        sug_id = query.data.split("_")[1]
+        suggestions = fetch_pending_suggestions()
+        sug = next((s for s in suggestions if str(s['id']) == sug_id), None)
+        if not sug:
+            await query.answer("لم يتم العثور على الاقتراح")
+            return await start(update, context)
+            
+        def get_en_key(ar_val, mapping):
+            for k, v in mapping.items():
+                if v == ar_val: return k
+            return ""
+            
+        main_en = get_en_key(sug.get('main_category', ''), CATEGORY_TRANSLATION)
+        sub_en = get_en_key(sug.get('sub_category', ''), SUB_CATEGORY_TRANSLATION)
+        
+        update_suggestion_status(sug_id, "approved")
+        
+        if main_en and sub_en:
+            add_site(
+                main_category_en=main_en,
+                sub_category_en=sub_en,
+                website=sug.get('website', ''),
+                description=sug.get('description', ''),
+                benefit=sug.get('benefit', '')
+            )
+            await query.answer("✅ تم قبول وإضافة الموقع مباشرة للفرع المحدد!", show_alert=True)
+            query.data = 'review_suggestions'
+            return await handle_button(update, context)
+        else:
+            context.user_data['name'] = sug.get('website', '')
+            context.user_data['description'] = sug.get('description', '')
+            context.user_data['benefit'] = sug.get('benefit', '')
+            
+            options = list(CATEGORIES.keys())
+            reply_markup = build_main_category_keyboard(options)
+            await query.edit_message_text(f"تم قبول {sug.get('website', '')}!\n\n⚠️ التصنيفات لم تتعرف تلقائياً.\n📂 يرجى اختيار التصنيف الرئيسي لإضافته:", reply_markup=reply_markup)
+            return MAIN_CATEGORY
+
+    elif query.data.startswith("rej_"):
+        from db import update_suggestion_status
+        sug_id = query.data.split("_")[1]
+        update_suggestion_status(sug_id, "rejected")
+        await query.answer("تم رفض/تعليق الاقتراح")
+        query.data = 'review_suggestions' # لمحاكاة الضغط وتجلب الاقتراح التالي
+        return await handle_button(update, context)
+
+    elif query.data == "skip_sug":
+        return await start(update, context)
+    # ----------------------
     elif query.data == 'export_data':
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("تصدير الكل (كل المواقع) 📦", callback_data='export_all')],
@@ -126,8 +259,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                         "الفائدة": site.get("benefit", "")
                     })
         await generate_and_send_excel(query.message, flat_data, 'sites_all.xlsx', "✅ تم التصدير الكامل")
-        await query.message.reply_text("اختر أحد الخيارات:", reply_markup=start_keyboard)
-        return NAME
+        return await start(update, context)
     elif query.data == 'export_smart':
         await query.edit_message_text("✍️ اكتب الكلمة الافتتاحية أو الفائدة التي تبحث عنها (مثال: مونتاج، تصميم، ذكاء اصطناعي):")
         return EXPORT_SMART_SEARCH
@@ -147,8 +279,8 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             logger.info(f"محاولة عرض النتيجة رقم {index}. عدد النتائج: {len(search_results)}")
             if not search_results:
                 logger.error("قائمة search_results فارغة")
-                await query.edit_message_text("⚠️ النتائج غير متوفرة. حاول البحث مرة أخرى.", reply_markup=start_keyboard)
-                return NAME
+                await query.answer("⚠️ النتائج غير متوفرة. حاول البحث مرة أخرى.", show_alert=True)
+                return await start(update, context)
             if 0 <= index < len(search_results):
                 context.user_data['current_result_index'] = index
                 result = search_results[index]
@@ -164,21 +296,22 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 )
             else:
                 logger.error(f"الفهرس {index} خارج النطاق")
-                await query.edit_message_text("⚠️ النتيجة غير موجودة.", reply_markup=start_keyboard)
-                return NAME
+                await query.answer("⚠️ النتيجة غير موجودة.", show_alert=True)
+                return await start(update, context)
         except Exception as e:
             logger.error(f"خطأ أثناء عرض النتيجة: {e}")
-            await query.edit_message_text("⚠️ حدث خطأ أثناء عرض النتيجة.", reply_markup=start_keyboard)
-        return VIEW_RESULT
+            await query.answer("⚠️ حدث خطأ أثناء عرض النتيجة.", show_alert=True)
+            return await start(update, context)
     elif query.data == 'back_to_results':
         search_results = context.user_data.get('search_results', [])
         if search_results:
             keyboard = [[InlineKeyboardButton(match['website'], callback_data=f"view_{i}")] for i, match in enumerate(search_results)]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text("🔍 اختر النتيجة المطلوبة:", reply_markup=reply_markup)
+            return VIEW_RESULT
         else:
-            await query.edit_message_text("⚠️ لا توجد نتائج.", reply_markup=start_keyboard)
-        return VIEW_RESULT
+            await query.answer("⚠️ لا توجد نتائج.", show_alert=True)
+            return await start(update, context)
     elif query.data == 'edit_result':
         await query.edit_message_text("📝 أدخل اسم الموقع الجديد:")
         return EDIT_NAME
@@ -195,22 +328,19 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             if success:
                 search_results.pop(index)
                 context.user_data['search_results'] = search_results
-                await query.edit_message_text("🗑️ تم حذف الموقع بنجاح.", reply_markup=start_keyboard)
+                await query.answer("🗑️ تم حذف الموقع بنجاح.", show_alert=True)
+                return await start(update, context)
             else:
-                await query.edit_message_text("⚠️ فشل في حذف الموقع.", reply_markup=start_keyboard)
-        return NAME
-    elif query.data == 'main_menu':
-        context.user_data.clear()
-        await query.edit_message_text("اختر أحد الخيارات:", reply_markup=start_keyboard)
-        return NAME
+                await query.answer("⚠️ فشل في حذف الموقع.", show_alert=True)
+                return await start(update, context)
     elif query.data == 'continue_add':
         # المتابعة بإضافة موقع مكرر
         await query.edit_message_text("✍️ وصف الموقع:")
         return DESCRIPTION
     elif query.data == 'cancel_add':
         context.user_data.clear()
-        await query.edit_message_text("🚫 تم الإلغاء.", reply_markup=start_keyboard)
-        return NAME
+        await query.answer("🚫 تم الإلغاء.", show_alert=True)
+        return await start(update, context)
     return NAME
 
 # --- معالجة اسم الموقع ---
@@ -276,8 +406,8 @@ async def get_main_category(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     logger.info(f"تم اختيار التصنيف الرئيسي: {main_category}")
 
     if main_category not in CATEGORIES:
-        await query.edit_message_text("⚠️ التصنيف الرئيسي غير موجود.", reply_markup=start_keyboard)
-        return NAME
+        await query.answer("⚠️ التصنيف الرئيسي غير موجود.", show_alert=True)
+        return await start(update, context)
 
     context.user_data['main_category'] = main_category
     sub_categories = CATEGORIES.get(main_category, [])
@@ -307,13 +437,13 @@ async def get_sub_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     main_category = context.user_data.get('main_category')
     if not main_category or main_category not in CATEGORIES:
-        await query.edit_message_text("⚠️ التصنيف الرئيسي غير موجود.", reply_markup=start_keyboard)
-        return NAME
+        await query.answer("⚠️ التصنيف الرئيسي غير موجود.", show_alert=True)
+        return await start(update, context)
 
     sub_categories = CATEGORIES.get(main_category, [])
     if sub_category_en not in sub_categories and sub_categories:
-        await query.edit_message_text("⚠️ التصنيف الفرعي غير موجود.", reply_markup=start_keyboard)
-        return NAME
+        await query.answer("⚠️ التصنيف الفرعي غير موجود.", show_alert=True)
+        return await start(update, context)
 
     context.user_data['sub_category'] = sub_category_en
     main_category_ar = CATEGORY_TRANSLATION.get(main_category, main_category)
@@ -340,9 +470,9 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     required_keys = ['name', 'description', 'benefit', 'main_category']
     if not all(key in context.user_data for key in required_keys):
-        await query.edit_message_text("⚠️ هناك خطأ في البيانات.", reply_markup=start_keyboard)
+        await query.answer("⚠️ هناك خطأ في البيانات.", show_alert=True)
         context.user_data.clear()
-        return NAME
+        return await start(update, context)
 
     if user_response == 'yes':
         main_category = context.user_data['main_category']
@@ -354,13 +484,13 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             description=context.user_data['description'],
             benefit=context.user_data['benefit']
         )
-        await query.edit_message_text("💾 تم الحفظ بنجاح.", reply_markup=start_keyboard)
+        await query.answer("💾 تم الحفظ بنجاح.", show_alert=True)
         context.user_data.clear()
-        return NAME
+        return await start(update, context)
     else:
-        await query.edit_message_text("🚫 تم الإلغاء.", reply_markup=start_keyboard)
+        await query.answer("🚫 تم الإلغاء.", show_alert=True)
         context.user_data.clear()
-        return NAME
+        return await start(update, context)
 
 # --- تنفيذ البحث ---
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -390,7 +520,7 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await loading_msg.edit_text("🔍 اختر النتيجة المطلوبة:", reply_markup=reply_markup)
     else:
-        await loading_msg.edit_text("⚠️ لا توجد نتائج.", reply_markup=start_keyboard)
+        await loading_msg.edit_text("⚠️ لا توجد نتائج.")
     return VIEW_RESULT
 
 # --- معالجة تعديل اسم الموقع ---
@@ -447,8 +577,8 @@ async def edit_benefit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 reply_markup=result_options_keyboard()
             )
         else:
-            await update.message.reply_text("⚠️ فشل في تعديل الموقع.", reply_markup=start_keyboard)
-            return NAME
+            await update.message.reply_text("⚠️ فشل في تعديل الموقع.")
+            return await start(update, context)
     return VIEW_RESULT
 
 # --- معالجة التصدير الذكي بالبحث ---

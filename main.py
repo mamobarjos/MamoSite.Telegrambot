@@ -12,9 +12,12 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
     filters,
+    TypeHandler,
 )
 from handlers import (
     start,
+    auth_middleware,
+    login_command,
     handle_button,
     get_name,
     get_description,
@@ -79,6 +82,12 @@ def main() -> None:
 
     # إنشاء التطبيق
     application = ApplicationBuilder().token(TOKEN).build()
+
+    # التحقق من الصلاحيات (Middleware) يتم تنفيذه قبل أي شيء آخر
+    application.add_handler(TypeHandler(Update, auth_middleware), group=-1)
+
+    # إضافة أمر تسجيل الدخول
+    application.add_handler(CommandHandler("login", login_command))
 
     # إعداد المحادثة
     conv_handler = ConversationHandler(

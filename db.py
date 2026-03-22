@@ -127,29 +127,22 @@ def update_site(main_category: str, sub_category: str, old_website: str,
         return False
 
 
-def remove_site(main_category: str, sub_category: str, website: str) -> bool:
+def remove_site(main_category_en: str, sub_category_en: str, website: str) -> bool:
     """
     حذف موقع من Supabase.
-    
-    Returns:
-        bool: True إذا تم الحذف بنجاح.
     """
     try:
         client = get_client()
-        response = client.table("sites").delete().eq(
+        client.table("sites").delete().eq(
             "website", website
         ).eq(
-            "main_category", main_category
+            "main_category", main_category_en
         ).eq(
-            "sub_category", sub_category
+            "sub_category", sub_category_en
         ).execute()
         
-        if response.data:
-            logger.info(f"تم حذف الموقع {website} بنجاح")
-            return True
-        else:
-            logger.info(f"لم يتم العثور على الموقع {website} في {main_category}/{sub_category}")
-            return False
+        logger.info(f"تم حذف الموقع {website} بنجاح من {main_category_en}/{sub_category_en}")
+        return True
     except Exception as e:
         logger.error(f"خطأ في حذف الموقع: {e}")
         return False
@@ -207,3 +200,36 @@ def check_duplicate(website: str) -> list:
     except Exception as e:
         logger.error(f"خطأ في فحص التكرار: {e}")
         return []
+
+
+def fetch_all_admins() -> list:
+    """جلب قائمة بجميع المسؤولين"""
+    try:
+        client = get_client()
+        response = client.table("admins").select("*").execute()
+        return response.data
+    except Exception as e:
+        logger.error(f"خطأ في جلب المسؤولين: {e}")
+        return []
+
+# --- دوال إدارة الاقتراحات (Suggestions) ---
+
+def fetch_pending_suggestions() -> list:
+    """جلب الاقتراحات المعلقة"""
+    try:
+        client = get_client()
+        response = client.table("suggestions").select("*").eq("status", "pending").order("created_at").execute()
+        return response.data
+    except Exception as e:
+        logger.error(f"خطأ في جلب الاقتراحات: {e}")
+        return []
+
+def update_suggestion_status(suggestion_id: str, new_status: str) -> bool:
+    """تحديث حالة اقتراح معين (approved, rejected)"""
+    try:
+        client = get_client()
+        client.table("suggestions").update({"status": new_status}).eq("id", suggestion_id).execute()
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في تحديث الاقتراح: {e}")
+        return False
