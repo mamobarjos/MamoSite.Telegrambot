@@ -7,4 +7,5 @@ pandas
 openpyxl
 supabase
 python-dotenv
-flaskgunicorn
+flask
+gunicorn
