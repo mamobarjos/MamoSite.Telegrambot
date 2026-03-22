@@ -30,6 +30,12 @@ from telegram.ext import ApplicationHandlerStop
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def escape_md(text):
+    """تهريب الرموز الخاصة في Markdown"""
+    for ch in ['_', '*', '`', '[']:
+        text = str(text).replace(ch, f'\\{ch}')
+    return text
+
 # --- التحقق الأمني (Middleware) ---
 async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user:
@@ -133,7 +139,7 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         context.user_data.pop('awaiting_admin_id', None)
         return await start(update, context)
     
-    success, error_msg = add_admin(new_id, f"Admin_{new_id}")
+    success, error_msg = add_admin(new_id, f"Admin {new_id}")
     if success:
         await update.message.reply_text(f"✅ تمت إضافة المسؤول الجديد بنجاح!\n\nTelegram ID: `{new_id}`\n\nالآن يمكنه فتح البوت واستخدامه مباشرة.", parse_mode='Markdown')
     else:
@@ -314,7 +320,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         if admins:
             for i, admin in enumerate(admins, 1):
                 owner_badge = " 👑" if admin.get('telegram_id') == 1156962576 else ""
-                text += f"{i}. {admin.get('name', 'غير معرف')} (`{admin.get('telegram_id', '?')}`){owner_badge}\n"
+                text += f"{i}. {escape_md(admin.get('name', 'غير معرف'))} (`{admin.get('telegram_id', '?')}`){owner_badge}\n"
         else:
             text += "لا يوجد مسؤولون مسجلون حالياً.\n"
         
@@ -373,7 +379,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         if admins:
             for i, admin in enumerate(admins, 1):
                 owner_badge = " 👑" if admin.get('telegram_id') == 1156962576 else ""
-                text += f"{i}. {admin.get('name', 'غير معرف')} (`{admin.get('telegram_id', '?')}`){owner_badge}\n"
+                text += f"{i}. {escape_md(admin.get('name', 'غير معرف'))} (`{admin.get('telegram_id', '?')}`){owner_badge}\n"
         else:
             text += "لا يوجد مسؤولون مسجلون حالياً.\n"
         text += "\n✅ تم تحديث القائمة."
