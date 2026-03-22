@@ -41,13 +41,18 @@ async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     if not is_admin(user_id):
         if update.message:
-            await update.message.reply_text("⛔ عذراً، هذا البوت مخصص للإدارة المركزية فقط.\n\nإذا كنت مسؤولاً، يرجى إرسال أمر الدخول بالشكل التالي:\n`/login PASSWORD`", parse_mode='Markdown')
+            await update.message.reply_text("⛔ عذراً، هذا البوت مخصص للإدارة المركزية فقط.\nيرجى التواصل مع المسؤول للحصول على صلاحية الوصول.")
         raise ApplicationHandlerStop()
 
 async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # تسجيل الدخول مخصص فقط للمالك
+    if update.effective_user.id != 257741366:
+        await update.message.reply_text("⛔ هذا الأمر مخصص للمالك فقط.\nيرجى التواصل مع المسؤول لإضافتك.")
+        return
+    
     args = context.args
     if not args:
-        await update.message.reply_text("⚠️ يرجى إدخال كلمة المرور مع الأمر، مثال:\n`/login 123456`")
+        await update.message.reply_text("⚠️ يرجى إدخال كلمة المرور مع الأمر، مثال:\n`/login PASSWORD`", parse_mode='Markdown')
         return
         
     if args[0] == ADMIN_PASSWORD:
@@ -62,7 +67,7 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ كلمة المرور غير صحيحة.")
 
 # تعريف حالات المحادثة
-NAME, DESCRIPTION, BENEFIT, MAIN_CATEGORY, SUB_CATEGORY, CONFIRM, SEARCH, VIEW_RESULT, EDIT_NAME, EDIT_DESCRIPTION, EDIT_BENEFIT, EXPORT_MENU, EXPORT_SMART_SEARCH, EXPORT_MAIN_CAT_SELECT, EXPORT_SUB_CAT_SELECT = range(15)
+NAME, DESCRIPTION, BENEFIT, MAIN_CATEGORY, SUB_CATEGORY, CONFIRM, SEARCH, VIEW_RESULT, EDIT_NAME, EDIT_DESCRIPTION, EDIT_BENEFIT, EXPORT_MENU, EXPORT_SMART_SEARCH, EXPORT_MAIN_CAT_SELECT, EXPORT_SUB_CAT_SELECT, ADD_ADMIN_STATE = range(16)
 
 
 # دالة لبناء لوحة مفاتيح تفاعلية للتصنيفات الفرعية
@@ -112,6 +117,31 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data.clear()
     return ConversationHandler.END
 
+# دالة إضافة مسؤول جديد عبر Telegram ID
+async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = update.message.text.strip()
+    
+    try:
+        new_id = int(text)
+    except ValueError:
+        await update.message.reply_text("❌ يرجى إدخال الـ Telegram ID كرقم صحيح فقط (بدون أحرف).\n\nأعد المحاولة أو اضغط /start للعودة.")
+        return ADD_ADMIN_STATE
+    
+    # التحقق من عدم إضافته مسبقاً
+    if is_admin(new_id):
+        await update.message.reply_text(f"⚠️ المستخدم `{new_id}` مسجل مسبقاً كمسؤول.", parse_mode='Markdown')
+        context.user_data.pop('awaiting_admin_id', None)
+        return await start(update, context)
+    
+    success, error_msg = add_admin(new_id, f"Admin_{new_id}")
+    if success:
+        await update.message.reply_text(f"✅ تمت إضافة المسؤول الجديد بنجاح!\n\nTelegram ID: `{new_id}`\n\nالآن يمكنه فتح البوت واستخدامه مباشرة.", parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f"⚠️ حدث خطأ أثناء الإضافة.\n\nالخطأ: {error_msg}")
+    
+    context.user_data.pop('awaiting_admin_id', None)
+    return await start(update, context)
+
 # ---# --- معالجات الأوامر ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
@@ -130,6 +160,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         [InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')],
         [InlineKeyboardButton("البحث 🔍", callback_data='search')]
     ])
+    
+    # Show admin management only for the owner
+    if update.effective_user.id == 257741366:
+        keyboard.append([InlineKeyboardButton("👥 إدارة المسؤولين", callback_data='manage_admins')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -233,6 +267,72 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     elif query.data == "skip_sug":
         return await start(update, context)
+    
+    # --- قسم إدارة المسؤولين ---
+    elif query.data == 'manage_admins':
+        if update.effective_user.id != 257741366:
+            await query.answer("⛔ فقط المالك يمكنه إدارة المسؤولين", show_alert=True)
+            return NAME
+        
+        admins = fetch_all_admins()
+        text = "👥 **إدارة المسؤولين**\n\n"
+        if admins:
+            for i, admin in enumerate(admins, 1):
+                owner_badge = " 👑" if admin.get('telegram_id') == 257741366 else ""
+                text += f"{i}. {admin.get('name', 'غير معرف')} (`{admin.get('telegram_id', '?')}`){owner_badge}\n"
+        else:
+            text += "لا يوجد مسؤولون مسجلون حالياً.\n"
+        
+        text += "\n━━━━━━━━━━━━━━━━━━\n"
+        text += "📌 **كيفية إضافة مسؤول جديد:**\n"
+        text += "1️⃣ أرسل لصديقك رابط البوت: @userinfobot\n"
+        text += "2️⃣ اطلب منه يفتحه ويرسل أي رسالة\n"
+        text += "3️⃣ سيظهر له رقم `Id:` — هذا هو الـ Telegram ID\n"
+        text += "4️⃣ يرسل لك هذا الرقم\n"
+        text += "5️⃣ اضغط ➕ إضافة مسؤول وأدخل الرقم\n"
+        text += "✅ **بعدها سيعمل البوت معه مباشرة!**\n\n"
+        text += "🗑️ **كيفية حذف مسؤول:**\n"
+        text += "اضغط حذف مسؤول واختر الشخص المراد حذفه."
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ إضافة مسؤول", callback_data='add_admin_start'),
+             InlineKeyboardButton("🗑️ حذف مسؤول", callback_data='del_admin_list')],
+            [InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')]
+        ])
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        return NAME
+    
+    elif query.data == 'add_admin_start':
+        await query.edit_message_text("✏️ أدخل رقم **Telegram ID** للشخص الذي تريد إضافته كمسؤول:\n\n(يمكنه معرفة رقمه بإرسال أي رسالة لبوت @userinfobot)", parse_mode='Markdown')
+        context.user_data['awaiting_admin_id'] = True
+        return ADD_ADMIN_STATE
+    
+    elif query.data == 'del_admin_list':
+        admins = fetch_all_admins()
+        admins = [a for a in admins if a.get('telegram_id') != 257741366]  # لا تسمح بحذف المالك
+        if not admins:
+            await query.answer("لا يوجد مسؤولون يمكن حذفهم", show_alert=True)
+            return await start(update, context)
+        
+        keyboard = []
+        for admin in admins:
+            name = admin.get('name', 'غير معرف')
+            tid = admin.get('telegram_id', '?')
+            keyboard.append([InlineKeyboardButton(f"❌ {name} ({tid})", callback_data=f"rmadm_{tid}")])
+        keyboard.append([InlineKeyboardButton("رجوع ⬅️", callback_data='manage_admins')])
+        
+        await query.edit_message_text("اختر المسؤول الذي تريد حذفه:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return NAME
+    
+    elif query.data.startswith("rmadm_"):
+        from db import remove_admin
+        tid = int(query.data.split("_")[1])
+        if remove_admin(tid):
+            await query.answer(f"✅ تم حذف المسؤول {tid} بنجاح", show_alert=True)
+        else:
+            await query.answer("⚠️ حدث خطأ أثناء الحذف", show_alert=True)
+        query.data = 'manage_admins'
+        return await handle_button(update, context)
     # ----------------------
     elif query.data == 'export_data':
         keyboard = InlineKeyboardMarkup([

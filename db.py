@@ -236,6 +236,16 @@ def fetch_all_admins() -> list:
         logger.error(f"خطأ في جلب المسؤولين: {e}")
         return []
 
+def remove_admin(telegram_id: int) -> bool:
+    """حذف مسؤول حسب رقم تيليجرام"""
+    try:
+        client = get_client()
+        client.table("admins").delete().eq("telegram_id", telegram_id).execute()
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في حذف المسؤول: {e}")
+        return False
+
 # --- دوال إدارة الاقتراحات (Suggestions) ---
 
 def fetch_pending_suggestions() -> list:

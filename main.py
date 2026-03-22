@@ -30,6 +30,7 @@ from handlers import (
     edit_name,
     edit_description,
     edit_benefit,
+    handle_add_admin,
     NAME,
     DESCRIPTION,
     BENEFIT,
@@ -45,6 +46,7 @@ from handlers import (
     EXPORT_SMART_SEARCH,
     EXPORT_MAIN_CAT_SELECT,
     EXPORT_SUB_CAT_SELECT,
+    ADD_ADMIN_STATE,
     handle_export_smart_search,
     export_get_main_category,
     export_get_sub_category,
@@ -114,6 +116,7 @@ def main() -> None:
             EXPORT_SMART_SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_export_smart_search)],
             EXPORT_MAIN_CAT_SELECT: [CallbackQueryHandler(export_get_main_category)],
             EXPORT_SUB_CAT_SELECT: [CallbackQueryHandler(export_get_sub_category)],
+            ADD_ADMIN_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_admin)],
         },
         fallbacks=[
             CommandHandler("cancel", cancel_conversation),
