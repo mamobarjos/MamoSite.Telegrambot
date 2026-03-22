@@ -222,18 +222,21 @@ async def show_suggestion(query, context, prefix=""):
         context.user_data.pop('dup_existing_site', None)
     
     # --- بناء الأزرار ---
-    # الصف الأول: الإجراءات الأساسية للاقتراح
     row1 = [
         InlineKeyboardButton("✅ موافقة", callback_data=f"app_{sug['id']}"),
-        InlineKeyboardButton("❌ رفض", callback_data=f"rej_{sug['id']}"),
-        InlineKeyboardButton("✏️ تعديل الاقتراح", callback_data=f"sug_edit_{sug['id']}")
+        InlineKeyboardButton("❌ رفض", callback_data=f"rej_{sug['id']}")
     ]
     
     rows = [row1]
     
-    # زر تعديل الموجود (يظهر فقط عند وجود تكرار)
+    # دمج أزرار التعديل في صف واحد لتجنب قص النص على التلفون
     if has_duplicate:
-        rows.append([InlineKeyboardButton("🔧 تعديل الموجود", callback_data=f"dup_edit_{sug['id']}")])
+        rows.append([
+            InlineKeyboardButton("✏️ تعديل الاقتراح", callback_data=f"sug_edit_{sug['id']}"),
+            InlineKeyboardButton("🔧 تعديل الموجود", callback_data=f"dup_edit_{sug['id']}")
+        ])
+    else:
+        rows.append([InlineKeyboardButton("✏️ تعديل الاقتراح", callback_data=f"sug_edit_{sug['id']}")])
     
     # أزرار التنقل
     nav_buttons = []
