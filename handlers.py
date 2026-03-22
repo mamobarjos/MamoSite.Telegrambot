@@ -258,12 +258,31 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             return MAIN_CATEGORY
 
     elif query.data.startswith("rej_"):
-        from db import update_suggestion_status
+        from db import update_suggestion_status, fetch_pending_suggestions
         sug_id = query.data.split("_")[1]
         update_suggestion_status(sug_id, "rejected")
-        await query.answer("تم رفض/تعليق الاقتراح")
-        query.data = 'review_suggestions' # لمحاكاة الضغط وتجلب الاقتراح التالي
-        return await handle_button(update, context)
+        
+        # تحقق من وجود اقتراحات أخرى
+        remaining = fetch_pending_suggestions()
+        if remaining:
+            sug = remaining[0]
+            text = (f"✅ تم الرفض!\n\n📩 اقتراح التالي:\n\n"
+                    f"🌐 الموقع: {sug.get('website', '')}\n"
+                    f"📂 التصنيفات: {sug.get('main_category', '')} > {sug.get('sub_category', 'غير محدد')}\n"
+                    f"📝 الوصف: {sug.get('description', '')}\n"
+                    f"💡 الفائدة: {sug.get('benefit', 'لا يوجد')}")
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ موافقة وتسكين", callback_data=f"app_{sug['id']}"),
+                 InlineKeyboardButton("❌ تعليق/رفض", callback_data=f"rej_{sug['id']}")],
+                [InlineKeyboardButton("تخطي ➡️", callback_data="skip_sug"),
+                 InlineKeyboardButton("رجوع ⬅️", callback_data='main_menu')]
+            ])
+            await query.edit_message_text(text, reply_markup=keyboard)
+        else:
+            await query.edit_message_text("✅ تم الرفض!\n\n📭 لا يوجد اقتراحات أخرى معلقة.")
+            await asyncio.sleep(1)
+            return await start(update, context)
+        return NAME
 
     elif query.data == "skip_sug":
         return await start(update, context)
@@ -331,8 +350,23 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             await query.answer(f"✅ تم حذف المسؤول {tid} بنجاح", show_alert=True)
         else:
             await query.answer("⚠️ حدث خطأ أثناء الحذف", show_alert=True)
-        query.data = 'manage_admins'
-        return await handle_button(update, context)
+        # عرض قائمة المسؤولين المحدثة مباشرة
+        admins = fetch_all_admins()
+        text = "👥 **إدارة المسؤولين**\n\n"
+        if admins:
+            for i, admin in enumerate(admins, 1):
+                owner_badge = " 👑" if admin.get('telegram_id') == 1156962576 else ""
+                text += f"{i}. {admin.get('name', 'غير معرف')} (`{admin.get('telegram_id', '?')}`){owner_badge}\n"
+        else:
+            text += "لا يوجد مسؤولون مسجلون حالياً.\n"
+        text += "\n✅ تم تحديث القائمة."
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ إضافة مسؤول", callback_data='add_admin_start'),
+             InlineKeyboardButton("🗑️ حذف مسؤول", callback_data='del_admin_list')],
+            [InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')]
+        ])
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        return NAME
     # ----------------------
     elif query.data == 'export_data':
         keyboard = InlineKeyboardMarkup([

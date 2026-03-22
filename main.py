@@ -116,7 +116,10 @@ def main() -> None:
             EXPORT_SMART_SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_export_smart_search)],
             EXPORT_MAIN_CAT_SELECT: [CallbackQueryHandler(export_get_main_category)],
             EXPORT_SUB_CAT_SELECT: [CallbackQueryHandler(export_get_sub_category)],
-            ADD_ADMIN_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_admin)],
+            ADD_ADMIN_STATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_admin),
+                CallbackQueryHandler(handle_button),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel_conversation),
