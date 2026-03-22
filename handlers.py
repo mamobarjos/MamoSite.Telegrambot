@@ -404,13 +404,20 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         old_name = dup.get('website', '')
         dup_main_ar = CATEGORY_TRANSLATION.get(dup.get('main_category', ''), dup.get('main_category', ''))
         dup_sub_ar = SUB_CATEGORY_TRANSLATION.get(dup.get('sub_category', ''), dup.get('sub_category', ''))
-        await query.edit_message_text(
-            f"🔧 **تعديل الموقع الموجود**\n\n"
+        
+        text = (
+            f"🔧 تعديل الموقع الموجود\n\n"
             f"📂 التصنيف: {dup_main_ar} > {dup_sub_ar}\n\n"
-            f"📝 **الاسم/الرابط الحالي:**\n`{old_name}`\n\n"
-            f"أدخل الاسم الجديد أو أرسل **-** للإبقاء على الحالي:",
-            parse_mode='Markdown'
+            f"📝 الاسم/الرابط الحالي:\n{old_name}\n\n"
+            f"أدخل الاسم الجديد أو أرسل - للإبقاء على الحالي:"
         )
+        
+        try:
+            await query.edit_message_text(text)
+        except Exception as e:
+            logger.error(f"Error editing message in dup_edit_: {e}")
+            await query.message.reply_text(text)
+            
         return EDIT_NAME
     
     # --- قسم إدارة المسؤولين ---
