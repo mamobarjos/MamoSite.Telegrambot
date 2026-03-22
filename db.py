@@ -214,16 +214,16 @@ def is_admin(user_id: int) -> bool:
         logger.error(f"خطأ في التحقق من المدير: {e}")
         return False
 
-def add_admin(user_id: int, name: str) -> bool:
+def add_admin(user_id: int, name: str) -> tuple[bool, str]:
     """إضافة مدير جديد"""
     try:
         client = get_client()
         data = {"telegram_id": user_id, "name": name}
         client.table("admins").insert(data).execute()
-        return True
+        return True, ""
     except Exception as e:
         logger.error(f"خطأ في إضافة مدير: {e}")
-        return False
+        return False, str(e)
 
 
 def fetch_all_admins() -> list:

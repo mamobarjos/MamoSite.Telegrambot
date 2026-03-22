@@ -53,10 +53,11 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if args[0] == ADMIN_PASSWORD:
         user_id = update.effective_user.id
         name = update.effective_user.first_name or "Admin"
-        if add_admin(user_id, name):
+        success, error_msg = add_admin(user_id, name)
+        if success:
             await update.message.reply_text("✅ تم التحقق بنجاح! أنت الآن مدير معتمد.\n\nاضغط /start لفتح لوحة التحكم.")
         else:
-            await update.message.reply_text("⚠️ حدث خطأ أثناء التسجيل.")
+            await update.message.reply_text(f"⚠️ حدث خطأ أثناء التسجيل.\n\nالخطأ: {error_msg}")
     else:
         await update.message.reply_text("❌ كلمة المرور غير صحيحة.")
 
