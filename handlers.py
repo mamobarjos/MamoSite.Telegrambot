@@ -181,7 +181,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 # --- دالة مساعدة لعرض اقتراح ---
 async def show_suggestion(query, context, prefix=""):
-    """عرض اقتراح بالفهرس الحالي مع أزرار التنقل"""
+    """عرض اقتراح بالفهرس الحالي مع أزرار التنقل وكشف التكرار"""
     suggestions = context.user_data.get('suggestions_list', [])
     idx = context.user_data.get('sug_index', 0)
     total = len(suggestions)
@@ -191,18 +191,48 @@ async def show_suggestion(query, context, prefix=""):
         return
     
     sug = suggestions[idx]
-    text = (f"{prefix}📩 اقتراح ({idx + 1}/{total}):\n\n"
-            f"🌐 الموقع: {sug.get('website', '')}\n"
-            f"📂 التصنيف: {sug.get('main_category', '')} > {sug.get('sub_category', 'غير محدد')}\n"
-            f"📝 الوصف: {sug.get('description', '')}\n"
-            f"💡 الفائدة: {sug.get('benefit', 'لا يوجد')}")
+    website = sug.get('website', '')
     
-    # أزرار الإجراءات
+    text = (f"{prefix}📩 اقتراح ({idx + 1}/{total}):\n\n"
+            f"🌐 الموقع: {escape_md(website)}\n"
+            f"📂 التصنيف: {escape_md(sug.get('main_category', ''))} > {escape_md(sug.get('sub_category', 'غير محدد'))}\n"
+            f"📝 الوصف: {escape_md(sug.get('description', ''))}\n"
+            f"💡 الفائدة: {escape_md(sug.get('benefit', 'لا يوجد'))}")
+    
+    # --- كشف التكرار ---
+    duplicates = check_duplicate(website)
+    has_duplicate = bool(duplicates)
+    
+    if has_duplicate:
+        dup = duplicates[0]  # أول تطابق
+        dup_main_ar = CATEGORY_TRANSLATION.get(dup.get('main_category', ''), dup.get('main_category', ''))
+        dup_sub_ar = SUB_CATEGORY_TRANSLATION.get(dup.get('sub_category', ''), dup.get('sub_category', ''))
+        text += (
+            f"\n\n⚠️ *هذا الموقع موجود مسبقاً في قاعدة البيانات!*\n"
+            f"──────────────────\n"
+            f"📌 *الموقع الموجود:*\n"
+            f"📂 التصنيف: {escape_md(dup_main_ar)} > {escape_md(dup_sub_ar)}\n"
+            f"📝 الوصف: {escape_md(dup.get('description', 'لا يوجد'))}\n"
+            f"💡 الفائدة: {escape_md(dup.get('benefit', 'لا يوجد'))}"
+        )
+        # حفظ بيانات الموقع الموجود لاستخدامها لاحقاً عند تعديله
+        context.user_data['dup_existing_site'] = dup
+    else:
+        context.user_data.pop('dup_existing_site', None)
+    
+    # --- بناء الأزرار ---
+    # الصف الأول: الإجراءات الأساسية للاقتراح
     row1 = [
         InlineKeyboardButton("✅ موافقة", callback_data=f"app_{sug['id']}"),
         InlineKeyboardButton("❌ رفض", callback_data=f"rej_{sug['id']}"),
-        InlineKeyboardButton("✏️ تعديل", callback_data=f"sug_edit_{sug['id']}")
+        InlineKeyboardButton("✏️ تعديل الاقتراح", callback_data=f"sug_edit_{sug['id']}")
     ]
+    
+    rows = [row1]
+    
+    # زر تعديل الموجود (يظهر فقط عند وجود تكرار)
+    if has_duplicate:
+        rows.append([InlineKeyboardButton("🔧 تعديل الموجود", callback_data=f"dup_edit_{sug['id']}")])
     
     # أزرار التنقل
     nav_buttons = []
@@ -210,16 +240,13 @@ async def show_suggestion(query, context, prefix=""):
         nav_buttons.append(InlineKeyboardButton("◀️ السابق", callback_data="sug_prev"))
     if idx < total - 1:
         nav_buttons.append(InlineKeyboardButton("التالي ▶️", callback_data="sug_next"))
-    
-    row3 = [InlineKeyboardButton("🏠 رجوع للقائمة", callback_data='main_menu')]
-    
-    rows = [row1]
     if nav_buttons:
         rows.append(nav_buttons)
-    rows.append(row3)
+    
+    rows.append([InlineKeyboardButton("🏠 رجوع للقائمة", callback_data='main_menu')])
     
     keyboard = InlineKeyboardMarkup(rows)
-    await query.edit_message_text(text, reply_markup=keyboard)
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 # --- معالجة النقر على الزر ---
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -351,6 +378,35 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         old_name = sug.get('website', '')
         await query.edit_message_text(
             f"✏️ **تعديل بيانات الاقتراح**\n\n"
+            f"📝 **الاسم/الرابط الحالي:**\n`{old_name}`\n\n"
+            f"أدخل الاسم الجديد أو أرسل **-** للإبقاء على الحالي:",
+            parse_mode='Markdown'
+        )
+        return EDIT_NAME
+
+    elif query.data.startswith("dup_edit_"):
+        # تعديل الموقع الموجود (المكرر) في قاعدة البيانات
+        dup = context.user_data.get('dup_existing_site')
+        if not dup:
+            await query.answer("⚠️ لم يتم العثور على بيانات الموقع الموجود.", show_alert=True)
+            return NAME
+        
+        # تجهيز بيانات الموقع الموجود للتعديل
+        context.user_data['edit_old_name'] = dup.get('website', '')
+        context.user_data['edit_old_description'] = dup.get('description', '')
+        context.user_data['edit_old_benefit'] = dup.get('benefit', '')
+        context.user_data['edit_main_category_en'] = dup.get('main_category', '')
+        context.user_data['edit_sub_category_en'] = dup.get('sub_category', '')
+        context.user_data['editing_mode'] = 'site'
+        # حفظ مؤشر الاقتراح للعودة إليه لاحقاً
+        context.user_data['return_to_suggestions'] = True
+        
+        old_name = dup.get('website', '')
+        dup_main_ar = CATEGORY_TRANSLATION.get(dup.get('main_category', ''), dup.get('main_category', ''))
+        dup_sub_ar = SUB_CATEGORY_TRANSLATION.get(dup.get('sub_category', ''), dup.get('sub_category', ''))
+        await query.edit_message_text(
+            f"🔧 **تعديل الموقع الموجود**\n\n"
+            f"📂 التصنيف: {dup_main_ar} > {dup_sub_ar}\n\n"
             f"📝 **الاسم/الرابط الحالي:**\n`{old_name}`\n\n"
             f"أدخل الاسم الجديد أو أرسل **-** للإبقاء على الحالي:",
             parse_mode='Markdown'
@@ -815,7 +871,42 @@ async def edit_benefit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         context.user_data.pop('editing_suggestion_id', None)
         return await start(update, context)
     
+    # تعديل موقع موجود (المكرر) قادم من مراجعة الاقتراحات
+    if context.user_data.get('return_to_suggestions'):
+        from db import fetch_pending_suggestions
+        main_cat_en = context.user_data.get('edit_main_category_en', '')
+        sub_cat_en = context.user_data.get('edit_sub_category_en', '')
+        success = edit_site(
+            main_category_en=main_cat_en,
+            sub_category_en=sub_cat_en,
+            old_website=context.user_data.get('edit_old_name', ''),
+            new_website=context.user_data['edit_name'],
+            new_description=context.user_data['edit_description'],
+            new_benefit=context.user_data['edit_benefit']
+        )
+        if success:
+            await update.message.reply_text(
+                f"✅ تم تعديل الموقع الموجود بنجاح!\n\n"
+                f"📌 الموقع المعدل:\n"
+                f"🌐 {context.user_data['edit_name']}\n"
+                f"📝 {context.user_data['edit_description']}\n"
+                f"💡 {context.user_data['edit_benefit']}"
+            )
+        else:
+            await update.message.reply_text("⚠️ حدث خطأ أثناء تعديل الموقع الموجود.")
+        
+        # تنظيف وإعادة بيانات الاقتراحات
+        context.user_data.pop('return_to_suggestions', None)
+        context.user_data.pop('edit_main_category_en', None)
+        context.user_data.pop('edit_sub_category_en', None)
+        context.user_data.pop('editing_mode', None)
+        updated = fetch_pending_suggestions()
+        context.user_data['suggestions_list'] = updated
+        context.user_data['sug_index'] = 0
+        return await start(update, context)
+    
     # تعديل موقع من نتائج البحث
+
     search_results = context.user_data.get('search_results', [])
     index = context.user_data.get('current_result_index', 0)
     if 0 <= index < len(search_results):
@@ -992,7 +1083,7 @@ def get_data_for_export(main_filter=None, sub_filter=None):
                 })
     return flat_data
 
-def create_html_report(data, title):
+def create_html_report(data: list, title: str) -> str:
     html = f"""<!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
@@ -1079,4 +1170,4 @@ async def generate_and_send_excel(message, flat_data, filename, success_text):
                     os.remove(temp_file)
                 except Exception as e:
                     logger.error(f"فشل في مسح الملف المؤقت {temp_file}: {e}")
-
+
