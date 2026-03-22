@@ -211,6 +211,7 @@ async def show_suggestion(query, context, prefix=""):
             f"\n\n⚠️ *هذا الموقع موجود مسبقاً في قاعدة البيانات!*\n"
             f"──────────────────\n"
             f"📌 *الموقع الموجود:*\n"
+            f"🌐 الاسم/الرابط: {escape_md(dup.get('website', 'لا يوجد'))}\n"
             f"📂 التصنيف: {escape_md(dup_main_ar)} > {escape_md(dup_sub_ar)}\n"
             f"📝 الوصف: {escape_md(dup.get('description', 'لا يوجد'))}\n"
             f"💡 الفائدة: {escape_md(dup.get('benefit', 'لا يوجد'))}"
