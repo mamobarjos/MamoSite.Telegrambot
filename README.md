@@ -35,17 +35,21 @@ source venv/bin/activate  # لنظام Linux/Mac
 pip install -r requirements.txt
 ```
 
-### 4. إعداد التوكن
-أنشئ ملف `config.py` في المجلد الرئيسي وأضف توكن البوت الخاص بك:
-```python
-TOKEN = "your-bot-token-here"
+### 4. إعداد متغيرات البيئة (التوكن وقاعدة البيانات)
+المشروع يعتمد الآن على ملف `.env` للحفاظ على الأمان وربط قاعدة بيانات Supabase.
+قم بإنشاء ملف باسم `.env` في المجلد الرئيسي وضع فيه بياناتك:
+```env
+TELEGRAM_BOT_TOKEN="your-bot-token-here"
+SUPABASE_URL="your-supabase-url-here"
+SUPABASE_KEY="your-supabase-api-key-here"
+ADMIN_PASSWORD="your-admin-password"
 ```
 
-### 5. تشغيل البوت
+### 5. تشغيل البوت محلياً
 ```bash
-.\venv\Scripts\Activate.ps1
 python main.py
 ```
+*(تم دمج واجهة Flask وهمية في `main.py` لضمان استقرار البوت عند استضافته على خوادم مثل Render)*
 
 ## الاستخدام
 1. ابدأ المحادثة مع البوت باستخدام الأمر `/start`.
