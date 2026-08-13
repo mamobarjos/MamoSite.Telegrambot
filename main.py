@@ -34,6 +34,8 @@ from handlers import (
     handle_add_ip,
     handle_add_ip_label,
     handle_change_password,
+    handle_manage_devices_placeholder,
+    handle_change_password_placeholder,
     NAME,
     DESCRIPTION,
     BENEFIT,

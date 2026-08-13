@@ -148,6 +148,27 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop('awaiting_admin_id', None)
     return await start(update, context)
 
+# --- دوال استجابة مبدئية (Placeholders) ---
+async def handle_manage_devices_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """دالة استجابة مبدئية لإدارة الأجهزة"""
+    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')]])
+    text = "📱 **إدارة الأجهزة**\n\n🚧 هذه الميزة قيد التطوير حالياً."
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    return NAME
+
+async def handle_change_password_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """دالة استجابة مبدئية لتغيير كلمة المرور"""
+    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')]])
+    text = "🔑 **تغيير كلمة المرور**\n\n🚧 هذه الميزة قيد التطوير حالياً."
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    return NAME
+
 # ---# --- معالجات الأوامر ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
@@ -164,7 +185,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     keyboard.extend([
         [InlineKeyboardButton("ابدأ إضافة موقع ▶️", callback_data='start_add')],
         [InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')],
-        [InlineKeyboardButton("البحث 🔍", callback_data='search')]
+        [InlineKeyboardButton("البحث 🔍", callback_data='search')],
+        [InlineKeyboardButton("📱 إدارة الأجهزة", callback_data='manage_devices')],
+        [InlineKeyboardButton("🔑 تغيير كلمة المرور", callback_data='change_site_password')]
     ])
     
     # Show admin management only for the owner
@@ -265,6 +288,10 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     elif query.data == 'main_menu':
         context.user_data.clear()
         return await start(update, context)
+    elif query.data == 'manage_devices':
+        return await handle_manage_devices_placeholder(update, context)
+    elif query.data == 'change_site_password':
+        return await handle_change_password_placeholder(update, context)
         
     # --- قسم الاقتراحات ---
     elif query.data == 'review_suggestions':
