@@ -217,10 +217,10 @@ async def handle_manage_devices(update: Update, context: ContextTypes.DEFAULT_TY
                     
             icon = "🌐"
             label_lower = label.lower()
-            if any(x in label_lower for x in ["windows", "mac", "macintosh", "linux", "ubuntu"]):
-                icon = "💻"
-            elif any(x in label_lower for x in ["android", "iphone", "ipad", "ios"]):
+            if any(x in label_lower for x in ["android", "iphone", "ipad", "mobile", "ios"]):
                 icon = "📱"
+            elif any(x in label_lower for x in ["windows", "mac", "macintosh", "linux", "ubuntu"]):
+                icon = "💻"
             
             status = "🔴 محظور" if is_blocked else "🟢 مسموح"
             text += f"{idx}. {icon} {status}: `{ip}`\n"
@@ -349,17 +349,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if count > 0:
         keyboard.append([InlineKeyboardButton(f"📩 مراجعة الاقتراحات ({count})", callback_data='review_suggestions')])
     
-    keyboard.append([InlineKeyboardButton("ابدأ إضافة موقع ▶️", callback_data='start_add')])
-    keyboard.append([InlineKeyboardButton("البحث 🔍", callback_data='search')])
+    keyboard.append([
+        InlineKeyboardButton("ابدأ إضافة موقع ▶️", callback_data='start_add'),
+        InlineKeyboardButton("البحث 🔍", callback_data='search')
+    ])
     
     # زر "إدارة المسؤولين" ثم "إدارة الأجهزة"
+    row2 = []
     if update.effective_user.id == 1156962576:
-        keyboard.append([InlineKeyboardButton("👥 إدارة المسؤولين", callback_data='manage_admins')])
-    keyboard.append([InlineKeyboardButton("📱 إدارة الأجهزة", callback_data='manage_devices')])
+        row2.append(InlineKeyboardButton("👥 إدارة المسؤولين", callback_data='manage_admins'))
+    row2.append(InlineKeyboardButton("📱 إدارة الأجهزة", callback_data='manage_devices'))
+    keyboard.append(row2)
     
     # زر "تغيير كلمة المرور" ثم "تصدير البيانات"
-    keyboard.append([InlineKeyboardButton("🔑 تغيير كلمة المرور", callback_data='change_site_password')])
-    keyboard.append([InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')])
+    keyboard.append([
+        InlineKeyboardButton("🔑 تغيير كلمة المرور", callback_data='change_site_password'),
+        InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')
+    ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
