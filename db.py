@@ -315,25 +315,24 @@ def add_allowed_ip(ip: str, label: str = '') -> tuple[bool, str]:
 
 
 def remove_allowed_ip(ip: str) -> bool:
-    """حذف IP من القائمة البيضاء وإلغاء صلاحيته فوراً"""
+    """حذف IP من القائمة البيضاء"""
     try:
         identifier_str = str(ip).strip()
-        _BLOCKED_DEVICES_CACHE.add(identifier_str)
-        _FAILED_ATTEMPTS_CACHE[identifier_str] = 5
+        # مسح التخزين المؤقت للمحاولات الفاشلة والحظر
+        _BLOCKED_DEVICES_CACHE.discard(identifier_str)
+        if identifier_str in _FAILED_ATTEMPTS_CACHE:
+            del _FAILED_ATTEMPTS_CACHE[identifier_str]
         
         client = get_client()
+        # حذفه من القائمة البيضاء
         client.table("allowed_ips").delete().eq("ip", identifier_str).execute()
+        # حذفه من جدول الأجهزة أيضاً حتى لا يبقى محظوراً بالخطأ
         try:
-            client.table("devices").upsert({
-                "device_id": identifier_str,
-                "user_id": identifier_str,
-                "is_blocked": True,
-                "failed_attempts": 5
-            }, on_conflict="device_id").execute()
+            client.table("devices").delete().eq("device_id", identifier_str).execute()
         except Exception as dev_e:
-            logger.warning(f"تحديث devices عند المسح: {dev_e}")
+            logger.warning(f"خطأ في حذف device عند المسح: {dev_e}")
             
-        logger.info(f"تم حذف ووقف صلاحية الـ IP {identifier_str} فوراً")
+        logger.info(f"تم حذف الـ IP {identifier_str} بنجاح")
         return True
     except Exception as e:
         logger.error(f"خطأ في حذف IP: {e}")
@@ -500,7 +499,7 @@ def set_device_block_status(identifier: str, is_blocked: bool) -> bool:
 
 
 def fetch_all_devices_and_ips() -> list:
-    """جلب جميع الأجهزة والـ IPs المسموحة والمحظورة"""
+    """جلب جميع الأجهزة والـ IPs المسموحة والمحظورة مع البصمة"""
     try:
         client = get_client()
         allowed_ips = client.table("allowed_ips").select("*").execute().data or []
@@ -509,35 +508,40 @@ def fetch_all_devices_and_ips() -> list:
         combined = []
         seen_ids = set()
         
-        for ip_row in allowed_ips:
-            ip_val = ip_row.get("ip", "")
-            is_blocked = ip_row.get("is_blocked", False) or (ip_val in _BLOCKED_DEVICES_CACHE)
-            dev_match = next((d for d in devices if d.get("device_id") == ip_val or d.get("user_id") == ip_val), None)
-            if dev_match and dev_match.get("is_blocked"):
-                is_blocked = True
-                
-            label = ip_row.get("label", "") or "تلقائي"
-            combined.append({
-                "identifier": ip_val,
-                "label": label,
-                "is_blocked": is_blocked,
-                "type": "ip",
-                "created_at": ip_row.get("created_at", "")
-            })
-            seen_ids.add(ip_val)
-            
         for dev_row in devices:
             dev_id = str(dev_row.get("device_id") or dev_row.get("user_id", ""))
             if dev_id and dev_id not in seen_ids:
                 is_blocked = dev_row.get("is_blocked", False) or (dev_id in _BLOCKED_DEVICES_CACHE)
+                user_ip = dev_row.get("user_id", "مجهول")
+                user_agent = dev_row.get("user_agent", "مجهول")
+                location = dev_row.get("location", "")
+                
+                label = f"{user_ip} - {user_agent}"
+                if location:
+                    label += f" ({location})"
+                    
                 combined.append({
                     "identifier": dev_id,
-                    "label": f"جهاز {dev_id}",
+                    "label": label,
                     "is_blocked": is_blocked,
                     "type": "device",
                     "created_at": dev_row.get("created_at", "")
                 })
                 seen_ids.add(dev_id)
+                
+        for ip_row in allowed_ips:
+            ip_val = ip_row.get("ip", "")
+            if ip_val and ip_val not in seen_ids:
+                is_blocked = ip_row.get("is_blocked", False) or (ip_val in _BLOCKED_DEVICES_CACHE)
+                label = ip_row.get("label", "") or "تلقائي"
+                combined.append({
+                    "identifier": ip_val,
+                    "label": label,
+                    "is_blocked": is_blocked,
+                    "type": "ip",
+                    "created_at": ip_row.get("created_at", "")
+                })
+                seen_ids.add(ip_val)
                 
         return combined
     except Exception as e:
