@@ -42,6 +42,14 @@ async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     
+    from db import is_device_blocked
+    if is_device_blocked(str(user_id)):
+        if update.message:
+            await update.message.reply_text("⛔ عذراً، حسابك/جهازك محظور من استخدام البوت بسبب تكرار المحاولات الفاشلة.\nيرجى التواصل مع مسؤول النظام لفك الحظر.")
+        elif update.callback_query:
+            await update.callback_query.answer("⛔ حسابك/جهازك محظور من الاستخدام!", show_alert=True)
+        raise ApplicationHandlerStop()
+
     if update.message and update.message.text and update.message.text.startswith('/login'):
         return
         
@@ -51,9 +59,17 @@ async def auth_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raise ApplicationHandlerStop()
 
 async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # تسجيل الدخول مخصص فقط للمالك
-    if update.effective_user.id != 1156962576:
-        await update.message.reply_text("⛔ هذا الأمر مخصص للمالك فقط.\nيرجى التواصل مع المسؤول لإضافتك.")
+    user_id = update.effective_user.id
+    from db import is_device_blocked, record_login_attempt, set_device_block_status, add_admin, get_access_password
+    
+    # التحقق مما إذا كان الجهاز محظوراً
+    if is_device_blocked(str(user_id)):
+        await update.message.reply_text("⛔ **حسابك/جهازك محظور من محاولات التسجيل!**\nتجاوزت الحد المسموح للمحاولات الخاطئة. يرجى التواصل مع المسؤول لفك الحظر.")
+        return
+
+    # تسجيل الدخول مخصص فقط للمالك أو المدراء المصرح لهم
+    if user_id != 1156962576 and not is_admin(user_id):
+        await update.message.reply_text("⛔ هذا الأمر مخصص للمسؤولين فقط.\nيرجى التواصل مع المالك لإضافتك.")
         return
     
     args = context.args
@@ -61,19 +77,28 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ يرجى إدخال كلمة المرور مع الأمر، مثال:\n`/login PASSWORD`", parse_mode='Markdown')
         return
         
-    if args[0] == ADMIN_PASSWORD:
-        user_id = update.effective_user.id
+    entered_password = args[0].strip()
+    current_password = get_access_password() or ADMIN_PASSWORD
+
+    if entered_password == current_password or entered_password == ADMIN_PASSWORD:
+        record_login_attempt(str(user_id), success=True)
         name = update.effective_user.first_name or "Admin"
         success, error_msg = add_admin(user_id, name)
         if success:
             await update.message.reply_text("✅ تم التحقق بنجاح! أنت الآن مدير معتمد.\n\nاضغط /start لفتح لوحة التحكم.")
         else:
-            await update.message.reply_text(f"⚠️ حدث خطأ أثناء التسجيل.\n\nالخطأ: {error_msg}")
+            await update.message.reply_text(f"⚠️ أنت مسجل كمدير بالفعل أو حدث خطأ:\n{error_msg}")
     else:
-        await update.message.reply_text("❌ كلمة المرور غير صحيحة.")
+        failed_count = record_login_attempt(str(user_id), success=False)
+        if failed_count >= 5:
+            set_device_block_status(str(user_id), is_blocked=True)
+            await update.message.reply_text("❌ كلمة المرور غير صحيحة.\n\n⛔ **تنبيه أمني:** لقد قمت بإدخال كلمة المرور بشكل خاطئ 5 مرات متتالية! تم حظر حسابك/جهازك تلقائياً.")
+        else:
+            remaining = 5 - failed_count
+            await update.message.reply_text(f"❌ كلمة المرور غير صحيحة.\n⚠️ محاولة خاطئة ({failed_count}/5). متبقي {remaining} محاولات قبل حظر الجهاز تلقائياً.")
 
 # تعريف حالات المحادثة
-NAME, DESCRIPTION, BENEFIT, MAIN_CATEGORY, SUB_CATEGORY, CONFIRM, SEARCH, VIEW_RESULT, EDIT_NAME, EDIT_DESCRIPTION, EDIT_BENEFIT, EXPORT_MENU, EXPORT_SMART_SEARCH, EXPORT_MAIN_CAT_SELECT, EXPORT_SUB_CAT_SELECT, ADD_ADMIN_STATE, IP_MENU, ADD_IP_STATE, ADD_IP_LABEL_STATE, CHANGE_PASSWORD_STATE = range(20)
+NAME, DESCRIPTION, BENEFIT, MAIN_CATEGORY, SUB_CATEGORY, CONFIRM, SEARCH, VIEW_RESULT, EDIT_NAME, EDIT_DESCRIPTION, EDIT_BENEFIT, EXPORT_MENU, EXPORT_SMART_SEARCH, EXPORT_MAIN_CAT_SELECT, EXPORT_SUB_CAT_SELECT, ADD_ADMIN_STATE, IP_MENU, ADD_IP_STATE, ADD_IP_LABEL_STATE, CHANGE_PASSWORD_STATE, OLD_PWD_STATE, NEW_PWD_STATE, CONFIRM_PWD_STATE = range(23)
 
 
 # دالة لبناء لوحة مفاتيح تفاعلية للتصنيفات الفرعية
@@ -148,29 +173,38 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop('awaiting_admin_id', None)
     return await start(update, context)
 
-# --- إدارة الأجهزة المسموحة ---
+# --- إدارة الأجهزة المسموحة والمحظورة ---
 async def handle_manage_devices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """عرض إدارة الأجهزة المسموحة والتحكم بها من قاعدة البيانات"""
-    from db import fetch_allowed_ips
-    ips = fetch_allowed_ips()
-    count = len(ips)
+    """عرض إدارة الأجهزة والـ IPs المسموحة والمحظورة والتحكم بها"""
+    from db import fetch_all_devices_and_ips
+    items = fetch_all_devices_and_ips()
+    count = len(items)
     
     keyboard = []
-    if not ips:
-        text = "📱 *إدارة الأجهزة المسموحة*\n\n⚠️ لا توجد أجهزة أو IPs مسموحة حالياً في النظام."
+    if not items:
+        text = "📱 *إدارة الأجهزة والوصول*\n\n⚠️ لا توجد أجهزة أو IPs مسجلة حالياً في النظام."
     else:
         text = (
-            f"📱 *إدارة الأجهزة المسموحة ({count})*\n\n"
-            "اضغط على أي جهاز/IP أدناه لحذفه من الأجهزة المسموحة:\n"
+            f"📱 *إدارة الأجهزة والوصول ({count})*\n\n"
+            "من هنا يمكنك الاطلاع على الأجهزة/IPs وتغيير حالة الحظر أو حذفها:\n"
         )
-        for row in ips:
-            ip_val = row.get('ip', '')
-            label = row.get('label', '') or 'بدون وصف'
-            date = (row.get('created_at', '') or '')[:10]
-            btn_label = f"🗑️ {ip_val} — {label}"
-            if date:
-                btn_label += f" ({date})"
-            keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"del_ip:{ip_val}")])
+        for row in items:
+            ident = row.get('identifier', '')
+            label = row.get('label', '') or 'جهاز'
+            is_blocked = row.get('is_blocked', False)
+            
+            if is_blocked:
+                btn_label = f"🔴 محظور: {ident} ({label})"
+                keyboard.append([
+                    InlineKeyboardButton(btn_label, callback_data=f"unblock_dev:{ident}"),
+                    InlineKeyboardButton("🗑️ مسح", callback_data=f"ask_del_ip:{ident}")
+                ])
+            else:
+                btn_label = f"🟢 مسموح: {ident} ({label})"
+                keyboard.append([
+                    InlineKeyboardButton(btn_label, callback_data=f"ask_del_ip:{ident}"),
+                    InlineKeyboardButton("⛔ حظر", callback_data=f"block_dev:{ident}")
+                ])
             
     keyboard.append([InlineKeyboardButton("➕ إضافة IP جديد", callback_data='add_ip')])
     keyboard.append([InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')])
@@ -182,14 +216,92 @@ async def handle_manage_devices(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     return NAME
 
-async def handle_change_password_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """دالة استجابة مبدئية لتغيير كلمة المرور"""
-    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')]])
-    text = "🔑 **تغيير كلمة المرور**\n\n🚧 هذه الميزة قيد التطوير حالياً."
+# --- نظام تغيير كلمة المرور ---
+async def start_password_change_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """بدء عملية تغيير كلمة المرور وطلب كلمة المرور القديمة"""
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data='main_menu')]])
+    text = (
+        "🔑 **تغيير كلمة مرور الموقع**\n\n"
+        "الخطوة 1/3: يرجى إدخال **كلمة المرور القديمة (الحالية)**:"
+    )
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    return OLD_PWD_STATE
+
+async def handle_old_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """التحقق من كلمة المرور القديمة"""
+    entered = update.message.text.strip()
+    from db import get_access_password
+    current_pwd = get_access_password() or ADMIN_PASSWORD
+    
+    if entered != current_pwd and entered != ADMIN_PASSWORD:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data='main_menu')]])
+        await update.message.reply_text(
+            "❌ **كلمة المرور القديمة غير صحيحة.**\n\nيرجى إعادة المحاولة أو اضغط إلغاء للعودة:",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        return OLD_PWD_STATE
+        
+    context.user_data['old_pwd_verified'] = True
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data='main_menu')]])
+    await update.message.reply_text(
+        "✅ **تم التحقق من كلمة المرور القديمة بنجاح!**\n\nالخطوة 2/3: يرجى إدخال **كلمة المرور الجديدة** (4 أحرف على الأقل):",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+    return NEW_PWD_STATE
+
+async def handle_new_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """استقبال كلمة المرور الجديدة وطلب التكرار للتأكيد"""
+    new_pwd = update.message.text.strip()
+    if len(new_pwd) < 4:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data='main_menu')]])
+        await update.message.reply_text(
+            "❌ كلمة المرور قصيرة جداً (4 أحرف على الأقل).\nأعد إدخال كلمة المرور الجديدة:",
+            reply_markup=keyboard
+        )
+        return NEW_PWD_STATE
+        
+    context.user_data['pending_new_pwd'] = new_pwd
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data='main_menu')]])
+    await update.message.reply_text(
+        f"🔑 كلمة المرور الجديدة: `{escape_md(new_pwd)}`\n\nالخطوة 3/3: يرجى **إعادة إدخال كلمة المرور الجديدة لتأكيدها**:",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+    return CONFIRM_PWD_STATE
+
+async def handle_confirm_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """تأكيد كلمة المرور وحفظها في قاعدة البيانات"""
+    confirm_pwd = update.message.text.strip()
+    pending_pwd = context.user_data.get('pending_new_pwd', '')
+    
+    if confirm_pwd != pending_pwd:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ إلغاء", callback_data='main_menu')]])
+        await update.message.reply_text(
+            "❌ **كلمة المرور غير متطابقة!**\n\nيرجى إعادة كتابة كلمة المرور الجديدة لتأكيدها:",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        return CONFIRM_PWD_STATE
+        
+    from db import set_access_password
+    success = set_access_password(confirm_pwd)
+    context.user_data.pop('pending_new_pwd', None)
+    context.user_data.pop('old_pwd_verified', None)
+    
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')]])
+    if success:
+        await update.message.reply_text(
+            f"✅ **تم تغيير كلمة المرور بنجاح!**\n\n🔑 كلمة المرور الجديدة: `{escape_md(confirm_pwd)}`\n\nتم تطبيق كلمة المرور الجديدة في قاعدة البيانات.",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text("❌ حدث خطأ أثناء حفظ كلمة المرور الجديدة.", reply_markup=keyboard)
     return NAME
 
 # --- معالجات الأوامر ---
@@ -226,10 +338,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    start_text = (
+        "📋 *القائمة الرئيسية — اختر أحد الخيارات التالية:* \n"
+        "═════════════════════════════════════"
+    )
+    
     if update.callback_query:
-        await update.callback_query.edit_message_text("اختر أحد الخيارات:", reply_markup=reply_markup)
+        await update.callback_query.edit_message_text(start_text, reply_markup=reply_markup, parse_mode='Markdown')
     else:
-        await update.message.reply_text("اختر أحد الخيارات:", reply_markup=reply_markup)
+        await update.message.reply_text(start_text, reply_markup=reply_markup, parse_mode='Markdown')
     return NAME
 
 # --- دالة مساعدة لعرض اقتراح ---
@@ -320,14 +437,39 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return await start(update, context)
     elif query.data in ['manage_devices', 'manage_access']:
         return await handle_manage_devices(update, context)
-    elif query.data.startswith("del_ip:"):
+    elif query.data.startswith("ask_del_ip:"):
+        target_ip = query.data.split("ask_del_ip:")[1]
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ نعم، احذف الجهاز", callback_data=f"confirm_del_ip:{target_ip}")],
+            [InlineKeyboardButton("❌ إلغاء", callback_data='manage_devices')]
+        ])
+        await query.edit_message_text(
+            f"⚠️ *تأكيد حذف الجهاز/IP*\n\n"
+            f"هل أنت تأكد من رغبتك في حذف وصلاحية الجهاز التالية:\n`{target_ip}`؟",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        return NAME
+    elif query.data.startswith("confirm_del_ip:"):
         from db import remove_allowed_ip
-        target_ip = query.data.split("del_ip:")[1]
+        target_ip = query.data.split("confirm_del_ip:")[1]
         success = remove_allowed_ip(target_ip)
         if success:
-            await query.answer(f"✅ تم حذف الجهاز/IP {target_ip} بنجاح", show_alert=True)
+            await query.answer(f"✅ تم حذف الجهاز {target_ip} بنجاح", show_alert=True)
         else:
-            await query.answer("❌ حدث خطأ أثناء الحذف", show_alert=True)
+            await query.answer("❌ حدث خطأ أثناء حذف الجهاز", show_alert=True)
+        return await handle_manage_devices(update, context)
+    elif query.data.startswith("block_dev:"):
+        from db import set_device_block_status
+        target_id = query.data.split("block_dev:")[1]
+        set_device_block_status(target_id, True)
+        await query.answer("⛔ تم حظر الجهاز بنجاح", show_alert=True)
+        return await handle_manage_devices(update, context)
+    elif query.data.startswith("unblock_dev:"):
+        from db import set_device_block_status
+        target_id = query.data.split("unblock_dev:")[1]
+        set_device_block_status(target_id, False)
+        await query.answer("🔓 تم فك الحظر عن الجهاز بنجاح", show_alert=True)
         return await handle_manage_devices(update, context)
     elif query.data == 'add_ip':
         await query.edit_message_text(
@@ -338,7 +480,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         )
         return ADD_IP_STATE
     elif query.data == 'change_site_password':
-        return await handle_change_password_placeholder(update, context)
+        return await start_password_change_flow(update, context)
         
     # --- قسم الاقتراحات ---
     elif query.data == 'review_suggestions':

@@ -349,3 +349,181 @@ def set_access_password(new_password: str) -> bool:
     except Exception as e:
         logger.error(f"خطأ في تغيير كلمة المرور: {e}")
         return False
+
+
+# =====================================================
+# دوال نظام الحماية والأجهزة وربط المحاولات في Supabase
+# =====================================================
+
+def is_device_blocked(identifier: str) -> bool:
+    """التحقق مما إذا كان الجهاز أو المستخدم محظوراً"""
+    try:
+        client = get_client()
+        identifier_str = str(identifier)
+        # فحص في جدول devices
+        res = client.table("devices").select("is_blocked").or_(f"device_id.eq.{identifier_str},user_id.eq.{identifier_str}").execute()
+        if res.data and any(d.get("is_blocked") for d in res.data):
+            return True
+        # فحص في جدول allowed_ips
+        res2 = client.table("allowed_ips").select("is_blocked").eq("ip", identifier_str).execute()
+        if res2.data and any(d.get("is_blocked") for d in res2.data):
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"خطأ في التحقق من الحظر: {e}")
+        return False
+
+
+def record_login_attempt(identifier: str, success: bool, ip: str = "") -> int:
+    """
+    تسجيل محاولة دخول في login_attempts وإرجاع عدد المحاولات الخاطئة المتتالية.
+    """
+    try:
+        client = get_client()
+        identifier_str = str(identifier)
+        
+        # 1. إدراج سجل المحاولة في جدول login_attempts
+        try:
+            client.table("login_attempts").insert({
+                "identifier": identifier_str,
+                "success": success,
+                "ip_address": ip
+            }).execute()
+        except Exception as log_err:
+            logger.warning(f"تعذر الإدراج في جدول login_attempts: {log_err}")
+
+        if success:
+            reset_failed_attempts(identifier_str)
+            return 0
+        else:
+            return increment_failed_attempts(identifier_str)
+    except Exception as e:
+        logger.error(f"خطأ في تسجيل محاولة الدخول: {e}")
+        return 1
+
+
+def increment_failed_attempts(identifier: str) -> int:
+    """زيادة عداد المحاولات الفاشلة وحظر الجهاز إذا تجاوز 5 محاولات"""
+    try:
+        client = get_client()
+        identifier_str = str(identifier)
+        
+        res = client.table("devices").select("*").or_(f"device_id.eq.{identifier_str},user_id.eq.{identifier_str}").execute()
+        
+        failed_count = 1
+        if res.data:
+            dev = res.data[0]
+            failed_count = (dev.get("failed_attempts") or 0) + 1
+            is_blocked = failed_count >= 5
+            
+            client.table("devices").update({
+                "failed_attempts": failed_count,
+                "is_blocked": is_blocked,
+                "updated_at": "now()"
+            }).eq("id", dev["id"]).execute()
+        else:
+            is_blocked = failed_count >= 5
+            client.table("devices").insert({
+                "user_id": identifier_str,
+                "device_id": identifier_str,
+                "failed_attempts": failed_count,
+                "is_blocked": is_blocked
+            }).execute()
+            
+        return failed_count
+    except Exception as e:
+        logger.error(f"خطأ في زيادة المحاولات الفاشلة: {e}")
+        return 1
+
+
+def reset_failed_attempts(identifier: str) -> bool:
+    """إعادة تصفير المحاولات الفاشلة عند نجاح الدخول"""
+    try:
+        client = get_client()
+        identifier_str = str(identifier)
+        client.table("devices").update({
+            "failed_attempts": 0,
+            "updated_at": "now()"
+        }).or_(f"device_id.eq.{identifier_str},user_id.eq.{identifier_str}").execute()
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في إعادة تصفير المحاولات: {e}")
+        return False
+
+
+def set_device_block_status(identifier: str, is_blocked: bool) -> bool:
+    """تغيير حالة حظر جهاز أو IP في قاعدة البيانات"""
+    try:
+        client = get_client()
+        identifier_str = str(identifier)
+        
+        # 1. تحديث في devices
+        try:
+            client.table("devices").upsert({
+                "device_id": identifier_str,
+                "user_id": identifier_str,
+                "is_blocked": is_blocked,
+                "failed_attempts": 0 if not is_blocked else 5,
+                "updated_at": "now()"
+            }, on_conflict="device_id").execute()
+        except Exception as dev_err:
+            logger.warning(f"حدث تصفير/تحديث جزئي في devices: {dev_err}")
+
+        # 2. تحديث في allowed_ips إن وجد
+        try:
+            client.table("allowed_ips").update({
+                "is_blocked": is_blocked
+            }).eq("ip", identifier_str).execute()
+        except Exception as ip_err:
+            logger.warning(f"حدث تحديث جزئي في allowed_ips: {ip_err}")
+            
+        logger.info(f"تم تعديل حالة الحظر للجهاز {identifier_str} إلى {is_blocked}")
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في تغيير حالة الحظر: {e}")
+        return False
+
+
+def fetch_all_devices_and_ips() -> list:
+    """جلب جميع الأجهزة والـ IPs المسموحة والمحظورة"""
+    try:
+        client = get_client()
+        allowed_ips = client.table("allowed_ips").select("*").execute().data or []
+        devices = client.table("devices").select("*").execute().data or []
+        
+        combined = []
+        seen_ids = set()
+        
+        for ip_row in allowed_ips:
+            ip_val = ip_row.get("ip", "")
+            is_blocked = ip_row.get("is_blocked", False)
+            dev_match = next((d for d in devices if d.get("device_id") == ip_val or d.get("user_id") == ip_val), None)
+            if dev_match and dev_match.get("is_blocked"):
+                is_blocked = True
+                
+            combined.append({
+                "identifier": ip_val,
+                "label": ip_row.get("label", "") or "IP مسموح",
+                "is_blocked": is_blocked,
+                "type": "ip",
+                "created_at": ip_row.get("created_at", "")
+            })
+            seen_ids.add(ip_val)
+            
+        for dev_row in devices:
+            dev_id = str(dev_row.get("device_id") or dev_row.get("user_id", ""))
+            if dev_id and dev_id not in seen_ids:
+                combined.append({
+                    "identifier": dev_id,
+                    "label": f"جهاز {dev_id}",
+                    "is_blocked": dev_row.get("is_blocked", False),
+                    "type": "device",
+                    "created_at": dev_row.get("created_at", "")
+                })
+                seen_ids.add(dev_id)
+                
+        return combined
+    except Exception as e:
+        logger.error(f"خطأ في جلب الأجهزة والـ IPs: {e}")
+        return fetch_allowed_ips()
+
