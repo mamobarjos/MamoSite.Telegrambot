@@ -189,21 +189,26 @@ async def handle_manage_devices(update: Update, context: ContextTypes.DEFAULT_TY
             "من هنا يمكنك الاطلاع على الأجهزة/IPs وتغيير حالة الحظر أو حذفها:\n"
         )
         for row in items:
-            ident = row.get('identifier', '')
+            ip = row.get('identifier', '')
+            if not ip:
+                ip = row.get('ip', '')
+            if not ip:
+                ip = str(row.get('device_id', ''))
+                
             label = row.get('label', '') or 'جهاز'
             is_blocked = row.get('is_blocked', False)
             
             if is_blocked:
-                btn_label = f"🔴 محظور: {ident} ({label})"
+                btn_label = f"🔴 محظور: {ip} ({label})"
                 keyboard.append([
-                    InlineKeyboardButton(btn_label, callback_data=f"unblock_dev:{ident}"),
-                    InlineKeyboardButton("🗑️ مسح", callback_data=f"ask_del_ip:{ident}")
+                    InlineKeyboardButton(btn_label, callback_data=f"unblock_dev:{ip}"),
+                    InlineKeyboardButton("🗑️ مسح", callback_data=f"ask_del_ip:{ip}")
                 ])
             else:
-                btn_label = f"🟢 مسموح: {ident} ({label})"
+                btn_label = f"🟢 مسموح: {ip} ({label})"
                 keyboard.append([
-                    InlineKeyboardButton(btn_label, callback_data=f"ask_del_ip:{ident}"),
-                    InlineKeyboardButton("⛔ حظر", callback_data=f"block_dev:{ident}")
+                    InlineKeyboardButton(btn_label, callback_data=f"ask_del_ip:{ip}"),
+                    InlineKeyboardButton("⛔ حظر", callback_data=f"block_dev:{ip}")
                 ])
             
     keyboard.append([InlineKeyboardButton("➕ إضافة IP جديد", callback_data='add_ip')])
@@ -340,7 +345,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     start_text = (
         "📋 *القائمة الرئيسية — اختر أحد الخيارات التالية:* \n"
-        "═════════════════════════════════════"
+        "═══════════════════════════════"
     )
     
     if update.callback_query:
