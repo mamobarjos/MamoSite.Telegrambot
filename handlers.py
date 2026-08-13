@@ -183,6 +183,7 @@ async def handle_manage_devices(update: Update, context: ContextTypes.DEFAULT_TY
     keyboard = []
     if not items:
         text = "📱 *إدارة الأجهزة والوصول*\n\n⚠️ لا توجد أجهزة أو IPs مسجلة حالياً في النظام."
+        keyboard.append([InlineKeyboardButton("لا توجد أجهزة مسجلة حالياً", callback_data="manage_devices")])
     else:
         text = (
             f"📱 *إدارة الأجهزة والوصول ({count})*\n\n"
@@ -199,16 +200,18 @@ async def handle_manage_devices(update: Update, context: ContextTypes.DEFAULT_TY
             is_blocked = row.get('is_blocked', False)
             
             if is_blocked:
-                btn_label = f"🔴 محظور: {ip} ({label})"
+                info_label = f"🔴 محظور: {ip} ({label})"
+                keyboard.append([InlineKeyboardButton(info_label, callback_data="manage_devices")])
                 keyboard.append([
-                    InlineKeyboardButton(btn_label, callback_data=f"unblock_dev:{ip}"),
-                    InlineKeyboardButton("🗑️ مسح", callback_data=f"ask_del_ip:{ip}")
+                    InlineKeyboardButton("🗑️ حذف الجهاز", callback_data=f"ask_del_ip:{ip}"),
+                    InlineKeyboardButton("🔓 فك الحظر", callback_data=f"unblock_dev:{ip}")
                 ])
             else:
-                btn_label = f"🟢 مسموح: {ip} ({label})"
+                info_label = f"🟢 مسموح: {ip} ({label})"
+                keyboard.append([InlineKeyboardButton(info_label, callback_data="manage_devices")])
                 keyboard.append([
-                    InlineKeyboardButton(btn_label, callback_data=f"ask_del_ip:{ip}"),
-                    InlineKeyboardButton("⛔ حظر", callback_data=f"block_dev:{ip}")
+                    InlineKeyboardButton("🗑️ حذف الجهاز", callback_data=f"ask_del_ip:{ip}"),
+                    InlineKeyboardButton("⛔ حظر الجهاز", callback_data=f"block_dev:{ip}")
                 ])
             
     keyboard.append([InlineKeyboardButton("➕ إضافة IP جديد", callback_data='add_ip')])
