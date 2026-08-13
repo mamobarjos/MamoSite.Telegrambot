@@ -347,8 +347,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     start_text = (
-        "📋 *القائمة الرئيسية — اختر أحد الخيارات التالية:* \n"
-        "═══════════════════════════════"
+        "📋 *القائمة الرئيسية:*\n"
+        "اختر أحد الخيارات التالية:"
     )
     
     if update.callback_query:
