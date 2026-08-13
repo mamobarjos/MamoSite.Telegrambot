@@ -31,6 +31,9 @@ from handlers import (
     edit_description,
     edit_benefit,
     handle_add_admin,
+    handle_add_ip,
+    handle_add_ip_label,
+    handle_change_password,
     NAME,
     DESCRIPTION,
     BENEFIT,
@@ -47,6 +50,10 @@ from handlers import (
     EXPORT_MAIN_CAT_SELECT,
     EXPORT_SUB_CAT_SELECT,
     ADD_ADMIN_STATE,
+    IP_MENU,
+    ADD_IP_STATE,
+    ADD_IP_LABEL_STATE,
+    CHANGE_PASSWORD_STATE,
     handle_export_smart_search,
     export_get_main_category,
     export_get_sub_category,
@@ -120,6 +127,22 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_admin),
                 CallbackQueryHandler(handle_button),
             ],
+            # === حالات إدارة الوصول عبر IP ===
+            IP_MENU: [
+                CallbackQueryHandler(handle_button),
+            ],
+            ADD_IP_STATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_ip),
+                CallbackQueryHandler(handle_button),
+            ],
+            ADD_IP_LABEL_STATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_ip_label),
+                CallbackQueryHandler(handle_button),
+            ],
+            CHANGE_PASSWORD_STATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_change_password),
+                CallbackQueryHandler(handle_button),
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel_conversation),
@@ -138,3 +161,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

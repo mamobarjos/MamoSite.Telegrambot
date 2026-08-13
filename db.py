@@ -282,3 +282,70 @@ def update_suggestion_data(suggestion_id: str, website: str, description: str, b
         logger.error(f"خطأ في تحديث بيانات الاقتراح: {e}")
         return False
 
+
+# =====================================================
+# دوال إدارة الوصول عبر IP وكلمة المرور
+# =====================================================
+
+def fetch_allowed_ips() -> list:
+    """جلب قائمة الـ IPs المسموح لها"""
+    try:
+        client = get_client()
+        response = client.table("allowed_ips").select("*").order("created_at", desc=False).execute()
+        return response.data
+    except Exception as e:
+        logger.error(f"خطأ في جلب الـ IPs: {e}")
+        return []
+
+
+def add_allowed_ip(ip: str, label: str = '') -> tuple[bool, str]:
+    """إضافة IP جديد إلى القائمة البيضاء"""
+    try:
+        client = get_client()
+        # التحقق من عدم الوجود مسبقاً
+        existing = client.table("allowed_ips").select("id").eq("ip", ip).execute()
+        if existing.data:
+            return False, "موجود مسبقاً"
+        client.table("allowed_ips").insert({"ip": ip, "label": label}).execute()
+        logger.info(f"تم إضافة IP {ip}")
+        return True, ""
+    except Exception as e:
+        logger.error(f"خطأ في إضافة IP: {e}")
+        return False, str(e)
+
+
+def remove_allowed_ip(ip: str) -> bool:
+    """حذف IP من القائمة البيضاء"""
+    try:
+        client = get_client()
+        client.table("allowed_ips").delete().eq("ip", ip).execute()
+        logger.info(f"تم حذف IP {ip}")
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في حذف IP: {e}")
+        return False
+
+
+def get_access_password() -> str:
+    """جلب كلمة المرور الحالية"""
+    try:
+        client = get_client()
+        response = client.table("site_settings").select("value").eq("key", "access_password").single().execute()
+        return response.data.get("value", "") if response.data else ""
+    except Exception as e:
+        logger.error(f"خطأ في جلب كلمة المرور: {e}")
+        return ""
+
+
+def set_access_password(new_password: str) -> bool:
+    """تغيير كلمة المرور"""
+    try:
+        client = get_client()
+        client.table("site_settings").upsert(
+            {"key": "access_password", "value": new_password, "updated_at": "now()"}
+        ).execute()
+        logger.info("تم تغيير كلمة المرور بنجاح")
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في تغيير كلمة المرور: {e}")
+        return False

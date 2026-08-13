@@ -73,7 +73,7 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ كلمة المرور غير صحيحة.")
 
 # تعريف حالات المحادثة
-NAME, DESCRIPTION, BENEFIT, MAIN_CATEGORY, SUB_CATEGORY, CONFIRM, SEARCH, VIEW_RESULT, EDIT_NAME, EDIT_DESCRIPTION, EDIT_BENEFIT, EXPORT_MENU, EXPORT_SMART_SEARCH, EXPORT_MAIN_CAT_SELECT, EXPORT_SUB_CAT_SELECT, ADD_ADMIN_STATE = range(16)
+NAME, DESCRIPTION, BENEFIT, MAIN_CATEGORY, SUB_CATEGORY, CONFIRM, SEARCH, VIEW_RESULT, EDIT_NAME, EDIT_DESCRIPTION, EDIT_BENEFIT, EXPORT_MENU, EXPORT_SMART_SEARCH, EXPORT_MAIN_CAT_SELECT, EXPORT_SUB_CAT_SELECT, ADD_ADMIN_STATE, IP_MENU, ADD_IP_STATE, ADD_IP_LABEL_STATE, CHANGE_PASSWORD_STATE = range(20)
 
 
 # دالة لبناء لوحة مفاتيح تفاعلية للتصنيفات الفرعية
@@ -1180,4 +1180,151 @@ async def generate_and_send_excel(message, flat_data, filename, success_text):
                     os.remove(temp_file)
                 except Exception as e:
                     logger.error(f"فشل في مسح الملف المؤقت {temp_file}: {e}")
+
+
+# ================================================================
+# === إدارة الوصول عبر IP — Access Control Handlers
+# ================================================================
+
+async def handle_ip_menu(query, context) -> int:
+    """عرض قائمة إدارة الوصول الرئيسية"""
+    from db import fetch_allowed_ips
+    ips = fetch_allowed_ips()
+    count = len(ips)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"📋 قائمة الأجهزة المسموحة ({count})", callback_data='list_ips')],
+        [
+            InlineKeyboardButton("➕ إضافة IP", callback_data='add_ip'),
+            InlineKeyboardButton("🗑️ حذف IP", callback_data='remove_ip_menu')
+        ],
+        [InlineKeyboardButton("🔑 تغيير كلمة المرور", callback_data='change_password')],
+        [InlineKeyboardButton("⬅️ رجوع للقائمة", callback_data='main_menu')]
+    ])
+    await query.edit_message_text(
+        "🔐 *إدارة الوصول إلى الموقع*\n\n"
+        "من هنا تتحكم في الأجهزة المسموح لها بالدخول وكلمة المرور.\n\n"
+        f"📱 الأجهزة المسموحة حالياً: `{count}`",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+    return IP_MENU
+
+
+async def handle_list_ips(query, context) -> int:
+    """عرض قائمة الـ IPs المسموح لها"""
+    from db import fetch_allowed_ips
+    ips = fetch_allowed_ips()
+    if not ips:
+        text = "📋 *قائمة الأجهزة المسموحة*\n\n⚠️ لا توجد أجهزة مسموحة حالياً."
+    else:
+        text = f"📋 *قائمة الأجهزة المسموحة ({len(ips)}):*\n\n"
+        for i, row in enumerate(ips, 1):
+            label = row.get('label', '') or 'بدون وصف'
+            date = (row.get('created_at', '') or '')[:10]
+            text += f"`{i}.` `{row['ip']}` — {escape_md(label)}"
+            if date:
+                text += f" _({date})_"
+            text += "\n"
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ رجوع", callback_data='manage_access')]])
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+    return IP_MENU
+
+
+async def handle_remove_ip_menu(query, context) -> int:
+    """عرض قائمة حذف الـ IPs"""
+    from db import fetch_allowed_ips
+    ips = fetch_allowed_ips()
+    if not ips:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ رجوع", callback_data='manage_access')]])
+        await query.edit_message_text("⚠️ لا توجد أجهزة لحذفها.", reply_markup=keyboard)
+        return IP_MENU
+    buttons = []
+    for row in ips[:20]:
+        label = row.get('label', '') or row['ip']
+        buttons.append([InlineKeyboardButton(
+            f"🗑️ {row['ip']} — {label}",
+            callback_data=f"del_ip:{row['ip']}"
+        )])
+    buttons.append([InlineKeyboardButton("⬅️ رجوع", callback_data='manage_access')])
+    await query.edit_message_text(
+        "🗑️ *حذف جهاز*\n\nاختر الـ IP الذي تريد حذفه:\n\n"
+        "⚠️ تنبيه: الأجهزة التي سبق منحها الإذن وتذكّر متصفحها ستظل تدخل حتى يمسح الكاش.",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode='Markdown'
+    )
+    return IP_MENU
+
+
+async def handle_add_ip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """معالجة إدخال IP الجديد"""
+    import re
+    ip = update.message.text.strip()
+    # تحقق بسيط من صيغة IP (IPv4 أو IPv6)
+    if not re.match(r'^[0-9a-fA-F.:]+$', ip) or len(ip) < 7:
+        await update.message.reply_text(
+            "❌ صيغة الـ IP غير صحيحة.\n\nمثال صحيح: `203.0.113.45`\n\nأعد الإرسال أو /start للإلغاء:",
+            parse_mode='Markdown'
+        )
+        return ADD_IP_STATE
+
+    context.user_data['pending_ip'] = ip
+    await update.message.reply_text(
+        f"✅ الـ IP: `{ip}`\n\n"
+        "أرسل وصفاً للجهاز (مثال: *جهاز المنزل* أو *موبايل أحمد*)، "
+        "أو أرسل `-` للتخطي:",
+        parse_mode='Markdown'
+    )
+    return ADD_IP_LABEL_STATE
+
+
+async def handle_add_ip_label(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """معالجة تسمية الجهاز وإتمام الإضافة"""
+    from db import add_allowed_ip
+    label = update.message.text.strip()
+    if label == '-':
+        label = ''
+    ip = context.user_data.pop('pending_ip', '')
+    success, msg = add_allowed_ip(ip, label)
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ إدارة الوصول", callback_data='manage_access')]])
+    if success:
+        await update.message.reply_text(
+            f"✅ تمت إضافة الجهاز بنجاح!\n\n"
+            f"🌐 IP: `{ip}`\n"
+            f"📱 الوصف: {escape_md(label) if label else 'بدون وصف'}\n\n"
+            "الجهاز الآن مسموح له بالدخول مباشرةً.",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            f"⚠️ `{ip}` موجود مسبقاً في القائمة أو حدث خطأ.\n\nالخطأ: {msg}",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    return IP_MENU
+
+
+async def handle_change_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """تغيير كلمة مرور الموقع"""
+    from db import set_access_password
+    new_pwd = update.message.text.strip()
+    if len(new_pwd) < 4:
+        await update.message.reply_text(
+            "❌ كلمة المرور قصيرة جداً (4 أحرف على الأقل).\nأعد الإرسال:"
+        )
+        return CHANGE_PASSWORD_STATE
+    success = set_access_password(new_pwd)
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ إدارة الوصول", callback_data='manage_access')]])
+    if success:
+        await update.message.reply_text(
+            f"✅ تم تغيير كلمة المرور بنجاح!\n\n"
+            f"🔑 كلمة المرور الجديدة: `{escape_md(new_pwd)}`\n\n"
+            "الزوار الجدد سيحتاجون إلى هذه الكلمة للدخول.",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text("❌ حدث خطأ أثناء التغيير.", reply_markup=keyboard)
+    return IP_MENU
+
 
