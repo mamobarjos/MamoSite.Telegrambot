@@ -189,25 +189,43 @@ async def handle_manage_devices(update: Update, context: ContextTypes.DEFAULT_TY
             f"📱 *إدارة الأجهزة والوصول ({count})*\n\n"
             "من هنا يمكنك الاطلاع على الأجهزة/IPs وتغيير حالة الحظر أو حذفها:\n\n"
         )
+        
+        from datetime import datetime
+        
         for idx, row in enumerate(items[:20], 1):
             ip = row.get('identifier', '')
-            if not ip:
-                ip = row.get('ip', '')
-            if not ip:
-                ip = str(row.get('device_id', ''))
+            if not ip: ip = row.get('ip', '')
+            if not ip: ip = str(row.get('device_id', ''))
                 
             label = row.get('label', '') or 'جهاز'
             is_blocked = row.get('is_blocked', False)
             failed_attempts = row.get('failed_attempts', 0)
+            created_at = row.get('created_at', '')
             
             # Use _FAILED_ATTEMPTS_CACHE if available
             from db import _FAILED_ATTEMPTS_CACHE
             if ip in _FAILED_ATTEMPTS_CACHE:
                 failed_attempts = _FAILED_ATTEMPTS_CACHE[ip]
+                
+            time_str = "غير متوفر"
+            if created_at:
+                try:
+                    dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    time_str = dt.strftime("%Y-%m-%d %I:%M %p").replace("AM", "ص").replace("PM", "م")
+                except:
+                    time_str = str(created_at)
+                    
+            icon = "🌐"
+            label_lower = label.lower()
+            if any(x in label_lower for x in ["windows", "mac", "macintosh", "linux", "ubuntu"]):
+                icon = "💻"
+            elif any(x in label_lower for x in ["android", "iphone", "ipad", "ios"]):
+                icon = "📱"
             
-            attempts_text = f" | أخطاء: {failed_attempts}" if failed_attempts > 0 else ""
             status = "🔴 محظور" if is_blocked else "🟢 مسموح"
-            text += f"{idx}. {status}: `{ip}`\n   📱 {label}{attempts_text}\n\n"
+            text += f"{idx}. {icon} {status}: `{ip}`\n"
+            text += f"   {label}\n"
+            text += f"   وقت الدخول: {time_str}\n\n"
             
             if is_blocked:
                 keyboard.append([
@@ -331,24 +349,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if count > 0:
         keyboard.append([InlineKeyboardButton(f"📩 مراجعة الاقتراحات ({count})", callback_data='review_suggestions')])
     
-    # الصف الأول: زر "ابدأ إضافة موقع" وبجانبه زر "البحث"
-    keyboard.append([
-        InlineKeyboardButton("ابدأ إضافة موقع ▶️", callback_data='start_add'),
-        InlineKeyboardButton("البحث 🔍", callback_data='search')
-    ])
+    keyboard.append([InlineKeyboardButton("ابدأ إضافة موقع ▶️", callback_data='start_add')])
+    keyboard.append([InlineKeyboardButton("البحث 🔍", callback_data='search')])
     
-    # الصف الثاني: زر "إدارة المسؤولين" وبجانبه زر "إدارة الأجهزة"
-    row2 = []
+    # زر "إدارة المسؤولين" ثم "إدارة الأجهزة"
     if update.effective_user.id == 1156962576:
-        row2.append(InlineKeyboardButton("👥 إدارة المسؤولين", callback_data='manage_admins'))
-    row2.append(InlineKeyboardButton("📱 إدارة الأجهزة", callback_data='manage_devices'))
-    keyboard.append(row2)
+        keyboard.append([InlineKeyboardButton("👥 إدارة المسؤولين", callback_data='manage_admins')])
+    keyboard.append([InlineKeyboardButton("📱 إدارة الأجهزة", callback_data='manage_devices')])
     
-    # الصف الثالث: زر "تغيير كلمة المرور" وزر "تصدير البيانات" في صف واحد جنباً إلى جنب
-    keyboard.append([
-        InlineKeyboardButton("🔑 تغيير كلمة المرور", callback_data='change_site_password'),
-        InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')
-    ])
+    # زر "تغيير كلمة المرور" ثم "تصدير البيانات"
+    keyboard.append([InlineKeyboardButton("🔑 تغيير كلمة المرور", callback_data='change_site_password')])
+    keyboard.append([InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
