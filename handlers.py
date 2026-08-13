@@ -148,11 +148,34 @@ async def handle_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data.pop('awaiting_admin_id', None)
     return await start(update, context)
 
-# --- دوال استجابة مبدئية (Placeholders) ---
-async def handle_manage_devices_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """دالة استجابة مبدئية لإدارة الأجهزة"""
-    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')]])
-    text = "📱 **إدارة الأجهزة**\n\n🚧 هذه الميزة قيد التطوير حالياً."
+# --- إدارة الأجهزة المسموحة ---
+async def handle_manage_devices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """عرض إدارة الأجهزة المسموحة والتحكم بها من قاعدة البيانات"""
+    from db import fetch_allowed_ips
+    ips = fetch_allowed_ips()
+    count = len(ips)
+    
+    keyboard = []
+    if not ips:
+        text = "📱 *إدارة الأجهزة المسموحة*\n\n⚠️ لا توجد أجهزة أو IPs مسموحة حالياً في النظام."
+    else:
+        text = (
+            f"📱 *إدارة الأجهزة المسموحة ({count})*\n\n"
+            "اضغط على أي جهاز/IP أدناه لحذفه من الأجهزة المسموحة:\n"
+        )
+        for row in ips:
+            ip_val = row.get('ip', '')
+            label = row.get('label', '') or 'بدون وصف'
+            date = (row.get('created_at', '') or '')[:10]
+            btn_label = f"🗑️ {ip_val} — {label}"
+            if date:
+                btn_label += f" ({date})"
+            keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"del_ip:{ip_val}")])
+            
+    keyboard.append([InlineKeyboardButton("➕ إضافة IP جديد", callback_data='add_ip')])
+    keyboard.append([InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     else:
@@ -169,7 +192,7 @@ async def handle_change_password_placeholder(update: Update, context: ContextTyp
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     return NAME
 
-# ---# --- معالجات الأوامر ---
+# --- معالجات الأوامر ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     logger.info(f"بدء المحادثة مع المستخدم {update.effective_user.id}")
@@ -182,17 +205,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if count > 0:
         keyboard.append([InlineKeyboardButton(f"📩 مراجعة الاقتراحات ({count})", callback_data='review_suggestions')])
     
-    keyboard.extend([
-        [InlineKeyboardButton("ابدأ إضافة موقع ▶️", callback_data='start_add')],
-        [InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')],
-        [InlineKeyboardButton("البحث 🔍", callback_data='search')],
-        [InlineKeyboardButton("📱 إدارة الأجهزة", callback_data='manage_devices')],
-        [InlineKeyboardButton("🔑 تغيير كلمة المرور", callback_data='change_site_password')]
+    # الصف الأول: زر "ابدأ إضافة موقع" وبجانبه زر "البحث"
+    keyboard.append([
+        InlineKeyboardButton("ابدأ إضافة موقع ▶️", callback_data='start_add'),
+        InlineKeyboardButton("البحث 🔍", callback_data='search')
     ])
     
-    # Show admin management only for the owner
+    # الصف الثاني: زر "إدارة المسؤولين" وبجانبه زر "إدارة الأجهزة"
+    row2 = []
     if update.effective_user.id == 1156962576:
-        keyboard.append([InlineKeyboardButton("👥 إدارة المسؤولين", callback_data='manage_admins')])
+        row2.append(InlineKeyboardButton("👥 إدارة المسؤولين", callback_data='manage_admins'))
+    row2.append(InlineKeyboardButton("📱 إدارة الأجهزة", callback_data='manage_devices'))
+    keyboard.append(row2)
+    
+    # الصف الثالث: زر "تغيير كلمة المرور" (لوحده في المنتصف)
+    keyboard.append([InlineKeyboardButton("🔑 تغيير كلمة المرور", callback_data='change_site_password')])
+    
+    # الصف الرابع: زر "تصدير البيانات" (لوحده في المنتصف)
+    keyboard.append([InlineKeyboardButton("تصدير البيانات 📤", callback_data='export_data')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -288,8 +318,25 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     elif query.data == 'main_menu':
         context.user_data.clear()
         return await start(update, context)
-    elif query.data == 'manage_devices':
-        return await handle_manage_devices_placeholder(update, context)
+    elif query.data in ['manage_devices', 'manage_access']:
+        return await handle_manage_devices(update, context)
+    elif query.data.startswith("del_ip:"):
+        from db import remove_allowed_ip
+        target_ip = query.data.split("del_ip:")[1]
+        success = remove_allowed_ip(target_ip)
+        if success:
+            await query.answer(f"✅ تم حذف الجهاز/IP {target_ip} بنجاح", show_alert=True)
+        else:
+            await query.answer("❌ حدث خطأ أثناء الحذف", show_alert=True)
+        return await handle_manage_devices(update, context)
+    elif query.data == 'add_ip':
+        await query.edit_message_text(
+            "➕ **إضافة جهاز / IP جديد**\n\n"
+            "أدخل عنوان الـ IP المسموح له بالدخول (مثال: `203.0.113.45`):\n\n"
+            "أو أرسل /start للإلغاء والعودة للقائمة.",
+            parse_mode='Markdown'
+        )
+        return ADD_IP_STATE
     elif query.data == 'change_site_password':
         return await handle_change_password_placeholder(update, context)
         
