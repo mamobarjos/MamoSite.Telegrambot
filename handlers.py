@@ -349,17 +349,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if count > 0:
         keyboard.append([InlineKeyboardButton(f"📩 مراجعة الاقتراحات ({count})", callback_data='review_suggestions')])
     
-    keyboard.append([InlineKeyboardButton("إضافة ➕", callback_data='start_add')])
-    keyboard.append([InlineKeyboardButton("بحث 🔍", callback_data='search')])
+    keyboard.append([
+        InlineKeyboardButton("🔍 البحث", callback_data='search'),
+        InlineKeyboardButton("➕ إضافة موقع", callback_data='start_add')
+    ])
     
-    # إدارة المسؤولين والأجهزة
+    row2 = [InlineKeyboardButton("📱 الأجهزة", callback_data='manage_devices')]
     if update.effective_user.id == 1156962576:
-        keyboard.append([InlineKeyboardButton("إدارة 👥", callback_data='manage_admins')])
-    keyboard.append([InlineKeyboardButton("أجهزة 📱", callback_data='manage_devices')])
+        row2.append(InlineKeyboardButton("👥 المسؤولين", callback_data='manage_admins'))
+    keyboard.append(row2)
     
-    # تغيير كلمة المرور وتصدير البيانات
-    keyboard.append([InlineKeyboardButton("رمز 🔑", callback_data='change_site_password')])
-    keyboard.append([InlineKeyboardButton("تصدير 📥", callback_data='export_data')])
+    keyboard.append([
+        InlineKeyboardButton("📥 تصدير", callback_data='export_data'),
+        InlineKeyboardButton("🔑 كلمة المرور", callback_data='change_site_password')
+    ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
